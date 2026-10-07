@@ -2,13 +2,7 @@
 #include "dobby.h"
 #include "KMem/KMem.h"
 #include <cstdint>
-
-struct ModConfig {
-    bool enableDamageMultiplier = false;
-    float damageMultiplier = 10.0f;
-    bool enableGodMode = false;
-    bool enableFreeShopping = false;
-};
+#include "../MenuLoad/Includes.h"
 
 ModConfig g_ModConfig;
 
@@ -66,26 +60,29 @@ void InitializeHooks() {
     if (!base) base = (uintptr_t)_dyld_get_image_header(0);
     if (!base) return;
 
+    // 更新 Base 供選單顯示
+    KTempVars.Base = base;
+
     // 1. 核心傷害倍率
-    void* addr1 = (void*)(KMEM::scanner::GetImageBase("UnityFramework") + 0x2EDD480);
+    void* addr1 = (void*)(base + 0x2EDD480);
     if (KMEM::io::IsValidPointer(addr1)) {
         DobbyHook(addr1, (void*)new_checkPrepareTriggerAttackEvent, (void**)&old_checkPrepareTriggerAttackEvent);
     }
 
     // 二次檢查
-    void* addr2 = (void*)(KMEM::scanner::GetImageBase("UnityFramework") + 0x2EDD4B0);
+    void* addr2 = (void*)(base + 0x2EDD4B0);
     if (KMEM::io::IsValidPointer(addr2)) {
         DobbyHook(addr2, (void*)new_checkTriggerAttackEvent, (void**)&old_checkTriggerAttackEvent);
     }
 
     // 無敵/血量
-    void* addr3 = (void*)(KMEM::scanner::GetImageBase("UnityFramework") + 0x2EDD630);
+    void* addr3 = (void*)(base + 0x2EDD630);
     if (KMEM::io::IsValidPointer(addr3)) {
         DobbyHook(addr3, (void*)new_changeHealthWithTarget, (void**)&old_changeHealthWithTarget);
     }
 
     // 免費購物/抽卡
-    void* addr4 = (void*)(KMEM::scanner::GetImageBase("UnityFramework") + 0x27D1124);
+    void* addr4 = (void*)(base + 0x27D1124);
     if (KMEM::io::IsValidPointer(addr4)) {
         DobbyHook(addr4, (void*)new_canUseChestGemCostNow, (void**)&old_canUseChestGemCostNow);
     }

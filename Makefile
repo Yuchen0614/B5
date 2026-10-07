@@ -19,9 +19,20 @@ $(TWEAK_NAME)_FILES = \
     MenuLoad/MenuLoad.mm \
     MenuLoad/ImGuiDrawView.xm \
     MenuLoad/GUI/UserMenu.mm \
-    $(wildcard ImGui/*.cpp) \
-    $(wildcard utils/libtitanox/**/*.cpp) \
-    $(wildcard utils/Komaru/*.mm)
+    ImGui/imgui.cpp \
+    ImGui/imgui_draw.cpp \
+    ImGui/imgui_tables.cpp \
+    ImGui/imgui_widgets.cpp \
+    ImGui/imgui_impl_metal.mm \
+    utils/libtitanox/brk_hook/Hook/hook.mm \
+    utils/libtitanox/fishhook/fishhook.c \
+    utils/libtitanox/libtitanox/libtitanox.mm \
+    utils/libtitanox/mempatch/THPatchMem.mm \
+    utils/libtitanox/MemX/VMTWrapper.mm \
+    utils/libtitanox/static-inline-hook/sih.mm \
+    utils/libtitanox/utils/utils.mm \
+    utils/libtitanox/vm_funcs/vm.mm \
+    utils/Komaru/KLog.mm
 
 $(TWEAK_NAME)_LIBRARIES += substrate
 $(TWEAK_NAME)_LDFLAGS += -L./utils/libtitanox -ldobby

@@ -15,8 +15,6 @@
 #define OFFSET_CHANGE_HEALTH 0x2EDD630             // changeHealthWithTarget
 #define OFFSET_CAN_USE_CHEST_GEM 0x27D1124         // canUseChestGemCostNow (免費購物/抽卡)
 
-#define TARGET_BINARY "UnityFramework"
-
 struct ModConfig {
     bool enableDamageMultiplier = false;
     float damageMultiplier = 10.0f;
