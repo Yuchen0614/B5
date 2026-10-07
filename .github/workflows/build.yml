@@ -2,7 +2,7 @@ name: Build Mod Menu
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -10,7 +10,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     env:
-      THEOS: /opt/theos
+      THEOS: /Users/runner/theos
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,8 +18,8 @@ jobs:
 
       - name: Setup Theos
         run: |
-          git clone --recursive https://github.com/theos/theos.git /opt/theos
-          echo "THEOS=/opt/theos" >> $GITHUB_ENV
+          git clone --recursive https://github.com/theos/theos.git /Users/runner/theos
+          echo "THEOS=/Users/runner/theos" >> $GITHUB_ENV
 
       - name: Install Dependencies
         run: |
@@ -27,7 +27,7 @@ jobs:
 
       - name: Compile
         run: |
-          export THEOS=/opt/theos
+          export THEOS=/Users/runner/theos
           export PATH=$THEOS/bin:$PATH
           make clean
           make FINALPACKAGE=1
