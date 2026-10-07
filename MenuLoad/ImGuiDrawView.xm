@@ -25,7 +25,7 @@ static bool MenDeal = true;
     if (!self.device)
         abort();
 
-    R_BasicCheats.Initialize();
+    InitializeHooks();
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
