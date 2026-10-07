@@ -1,0 +1,43 @@
+name: Build Mod Menu
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      THEOS: /opt/theos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git /opt/theos
+          echo "THEOS=/opt/theos" >> $GITHUB_ENV
+
+      - name: Install Dependencies
+        run: |
+          brew install ldid dpkg gettext
+
+      - name: Compile
+        run: |
+          export THEOS=/opt/theos
+          export PATH=$THEOS/bin:$PATH
+          make clean
+          make FINALPACKAGE=1
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: IdleGongfu-ModMenu
+          path: |
+            .theos/obj/**/*.dylib
+            *.deb
+            *.dylib
+          retention-days: 30

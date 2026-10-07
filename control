@@ -1,8 +1,18 @@
-Package: com.ktemp
-Name: komaru
-Depends: mobilesubstrate
-Version: 1
-Architecture: iphoneos-arm
-Description: template
-Maintainer: aq9
-Author: aq9
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>entry</dict>
+    <dict>
+        <key>cell</dict>
+        <dict>
+            <key>label</dict>
+            <string>IdleGongfu Mod Menu</string>
+        </dict>
+        <key>isController</dict>
+        <true/>
+        <key>bundle</dict>
+        <string>IdleGongfuModMenu</string>
+    </dict>
+</dict>
+</plist>
