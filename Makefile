@@ -24,7 +24,8 @@ $(TWEAK_NAME)_FILES = \
     ImGui/imgui_tables.cpp \
     ImGui/imgui_widgets.cpp \
     ImGui/imgui_impl_metal.mm \
-    utils/libtitanox/brk_hook/Hook/hook.mm \
+    utils/libtitanox/brk_hook/Hook/hook.c \
+    utils/libtitanox/brk_hook/Hook/mach_excServer.c \
     utils/libtitanox/fishhook/fishhook.c \
     utils/libtitanox/libtitanox/libtitanox.mm \
     utils/libtitanox/mempatch/THPatchMem.mm \
@@ -32,6 +33,7 @@ $(TWEAK_NAME)_FILES = \
     utils/libtitanox/static-inline-hook/sih.mm \
     utils/libtitanox/utils/utils.mm \
     utils/libtitanox/vm_funcs/vm.mm \
+    utils/libtitanox/main.mm \
     utils/Komaru/KLog.mm
 
 $(TWEAK_NAME)_LIBRARIES += substrate
