@@ -12,7 +12,7 @@ TWEAK_NAME = IdleGongfuModMenu
 $(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation Security QuartzCore CoreGraphics CoreText AVFoundation Accelerate GLKit SystemConfiguration GameController
 
 $(TWEAK_NAME)_CCFLAGS = -std=c++17 -fno-rtti -fno-exceptions -DNDEBUG -DUNITY
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-value -I./Source -I./utils -I./ImGui -I./utils/libtitanox
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-value -I./Source -I./utils -I./ImGui -I./utils/libtitanox -I./utils/dobby/include
 
 $(TWEAK_NAME)_FILES = \
     Source/BasicHacks.mm \
@@ -33,10 +33,11 @@ $(TWEAK_NAME)_FILES = \
     utils/libtitanox/static-inline-hook/sih.mm \
     utils/libtitanox/utils/utils.mm \
     utils/libtitanox/vm_funcs/vm.mm \
-    utils/Komaru/KLog.mm
+    utils/Komaru/KLog.mm \
+    utils/dobby/dobby.cpp
 
 $(TWEAK_NAME)_LIBRARIES += substrate
-$(TWEAK_NAME)_LDFLAGS += -L./utils/libtitanox -ldobby
+$(TWEAK_NAME)_LDFLAGS += -L./utils/libtitanox
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS)/makefiles/aggregate.mk
