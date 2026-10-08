@@ -57,6 +57,7 @@
 
 #include <mach/mach.h>
 #include <mach-o/loader.h>
+#include <mach-o/dyld.h>
 
 #include <signal.h>
 #include <setjmp.h>

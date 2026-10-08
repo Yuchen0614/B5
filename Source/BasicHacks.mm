@@ -64,27 +64,27 @@ void InitializeHooks() {
     KTempVars.Base = base;
 
     // 1. 核心傷害倍率
-    void* addr1 = (void*)(base + 0x2EDD480);
+    uintptr_t addr1 = base + 0x2EDD480;
     if (KMEM::io::IsValidPointer(addr1)) {
-        DobbyHook(addr1, (void*)new_checkPrepareTriggerAttackEvent, (void**)&old_checkPrepareTriggerAttackEvent);
+        DobbyHook((void*)addr1, (void*)new_checkPrepareTriggerAttackEvent, (void**)&old_checkPrepareTriggerAttackEvent);
     }
 
     // 二次檢查
-    void* addr2 = (void*)(base + 0x2EDD4B0);
+    uintptr_t addr2 = base + 0x2EDD4B0;
     if (KMEM::io::IsValidPointer(addr2)) {
-        DobbyHook(addr2, (void*)new_checkTriggerAttackEvent, (void**)&old_checkTriggerAttackEvent);
+        DobbyHook((void*)addr2, (void*)new_checkTriggerAttackEvent, (void**)&old_checkTriggerAttackEvent);
     }
 
     // 無敵/血量
-    void* addr3 = (void*)(base + 0x2EDD630);
+    uintptr_t addr3 = base + 0x2EDD630;
     if (KMEM::io::IsValidPointer(addr3)) {
-        DobbyHook(addr3, (void*)new_changeHealthWithTarget, (void**)&old_changeHealthWithTarget);
+        DobbyHook((void*)addr3, (void*)new_changeHealthWithTarget, (void**)&old_changeHealthWithTarget);
     }
 
     // 免費購物/抽卡
-    void* addr4 = (void*)(base + 0x27D1124);
+    uintptr_t addr4 = base + 0x27D1124;
     if (KMEM::io::IsValidPointer(addr4)) {
-        DobbyHook(addr4, (void*)new_canUseChestGemCostNow, (void**)&old_canUseChestGemCostNow);
+        DobbyHook((void*)addr4, (void*)new_canUseChestGemCostNow, (void**)&old_canUseChestGemCostNow);
     }
 }
 
