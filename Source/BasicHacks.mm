@@ -1,6 +1,6 @@
 #include "BasicHacks.h"
 #include "dobby.h"
-#include "KMem/KMem.h"
+#include "../utils/Komaru/KMem.h"
 #include <cstdint>
 #include "../MenuLoad/Includes.h"
 
