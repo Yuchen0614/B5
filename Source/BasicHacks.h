@@ -2,7 +2,7 @@
 #define BASIC_HACKS_H
 
 #include <cstdint>
-#import "TitanoxHook.h"
+#import "libtitanox.h"
 
 #define TARGET_BINARY "UnityFramework"
 
