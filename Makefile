@@ -11,8 +11,8 @@ TWEAK_NAME = IdleGongfuModMenu
 
 $(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation Security QuartzCore CoreGraphics CoreText AVFoundation Accelerate GLKit SystemConfiguration GameController
 
-$(TWEAK_NAME)_CCFLAGS = -std=c++17 -fno-rtti -fno-exceptions -DNDEBUG -DUNITY
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-value -I./Source -I./utils -I./ImGui -I./utils/libtitanox -I./utils/dobby/include
+$(TWEAK_NAME)_CCFLAGS = -std=c++17 -fno-rtti -fno-exceptions -DNDEBUG -DUNITY -Wno-nontrivial-memcall -Wno-string-plus-int
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-value -Wno-nontrivial-memcall -Wno-string-plus-int -I./Source -I./utils -I./ImGui -I./utils/libtitanox -I./utils/dobby/include
 
 $(TWEAK_NAME)_FILES = \
     Source/BasicHacks.mm \
