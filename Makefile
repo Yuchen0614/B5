@@ -1,46 +1,82 @@
 ARCHS = arm64
+TARGET = iphone:clang:latest:latest
+
 DEBUG = 0
 FINALPACKAGE = 1
 FOR_RELEASE = 1
-
-TARGET = iphone:clang:latest:14.0
 
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = IdleGongfuModMenu
 
-$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation Security QuartzCore CoreGraphics CoreText AVFoundation Accelerate GLKit SystemConfiguration GameController
+$(TWEAK_NAME)_FRAMEWORKS = \
+    UIKit \
+    Foundation \
+    Security \
+    QuartzCore \
+    CoreGraphics \
+    CoreText \
+    AVFoundation \
+    Accelerate \
+    GLKit \
+    SystemConfiguration \
+    GameController \
+    Metal \
+    MetalKit
 
-$(TWEAK_NAME)_CCFLAGS = -std=c++17 -fno-rtti -fno-exceptions -DNDEBUG -DUNITY -Wno-nontrivial-memcall -Wno-string-plus-int
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-value -Wno-nontrivial-memcall -Wno-string-plus-int -I./Source -I./utils -I./ImGui -I./utils/libtitanox -I./utils/dobby/include
+$(TWEAK_NAME)_CFLAGS = \
+    -fobjc-arc \
+    -Wall \
+    -Wno-deprecated-declarations \
+    -Wno-unused-variable \
+    -Wno-unused-value \
+    -Wno-unused-function \
+    -Wno-nontrivial-memcall \
+    -Wno-string-plus-int
+
+$(TWEAK_NAME)_CCFLAGS = \
+    -std=c++17 \
+    -fno-rtti \
+    -DNDEBUG \
+    -Wall \
+    -Wno-deprecated-declarations \
+    -Wno-unused-variable \
+    -Wno-unused-value \
+    -Wno-unused-function \
+    -Wno-writable-strings \
+    -Wno-nontrivial-memcall \
+    -Wno-string-plus-int \
+    -DKOMARU
 
 $(TWEAK_NAME)_FILES = \
-    Source/BasicHacks.mm \
-    MenuLoad/MenuLoad.mm \
     MenuLoad/ImGuiDrawView.xm \
-    MenuLoad/GUI/UserMenu.mm \
-    ImGui/imgui.cpp \
-    ImGui/imgui_draw.cpp \
-    ImGui/imgui_tables.cpp \
-    ImGui/imgui_widgets.cpp \
-    ImGui/imgui_impl_metal.mm \
+    $(wildcard MenuLoad/*.mm) \
+    $(wildcard MenuLoad/GUI/*.mm) \
+    $(wildcard Source/*.mm) \
+    $(wildcard ImGui/*.mm) \
+    $(wildcard ImGui/*.cpp) \
+    utils/libtitanox/libtitanox/main.mm \
     utils/libtitanox/brk_hook/Hook/hook.c \
     utils/libtitanox/brk_hook/Hook/mach_excServer.c \
     utils/libtitanox/fishhook/fishhook.c \
-    utils/libtitanox/libtitanox/main.mm \
     utils/libtitanox/mempatch/THPatchMem.mm \
     utils/libtitanox/MemX/VMTWrapper.mm \
     utils/libtitanox/static-inline-hook/sih.mm \
     utils/libtitanox/utils/utils.mm \
-    utils/libtitanox/vm_funcs/vm.mm \
-    utils/Komaru/KLog.mm \
-    utils/dobby/dobby.cpp
+    utils/libtitanox/vm_funcs/vm.mm
+
+$(TWEAK_NAME)_CFLAGS += \
+    -I$(THEOS_PROJECT_DIR)/utils/libtitanox \
+    -I$(THEOS_PROJECT_DIR)/utils/libtitanox/libtitanox \
+    -I$(THEOS_PROJECT_DIR)/utils/libtitanox/brk_hook/Hook \
+    -I$(THEOS_PROJECT_DIR)/utils/libtitanox/fishhook \
+    -I$(THEOS_PROJECT_DIR)/utils/libtitanox/mempatch \
+    -I$(THEOS_PROJECT_DIR)/utils/libtitanox/MemX \
+    -I$(THEOS_PROJECT_DIR)/utils/libtitanox/static-inline-hook \
+    -I$(THEOS_PROJECT_DIR)/utils/libtitanox/utils \
+    -I$(THEOS_PROJECT_DIR)/utils/libtitanox/vm_funcs
 
 $(TWEAK_NAME)_LIBRARIES += substrate
-$(TWEAK_NAME)_LDFLAGS += -L./utils/libtitanox
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS)/makefiles/aggregate.mk
-
-after-install::
-	install.exec "killall -9 idlegongfu || :"

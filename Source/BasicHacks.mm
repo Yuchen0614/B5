@@ -1,62 +1,71 @@
 #include "BasicHacks.h"
-#include "KMem/KMem.h"
-#include <cstdint>
+#include <substrate.h>
+#include <mach-o/dyld.h>
+#include <string.h>
 
 ModConfig g_ModConfig;
 
-// 原始函數指標
-void (*old_checkPrepareTriggerAttackEvent)(void* instance, void* foe, double atkRate, int source, int sourceId) = nullptr;
-void (*old_checkTriggerAttackEvent)(void* instance, void* foe, double atkRate, int source, int sourceId) = nullptr;
-void* (*old_changeHealthWithTarget)(void* instance, void* target, double attackRate, int source, int sourceId, int hurtType, int weaponSource) = nullptr;
-bool (*old_canUseChestGemCostNow)(void* instance, void* itemData, int purchaseCount) = nullptr;
+// ========== 原始函數指標 ==========
+static void (*orig_checkPrepareTriggerAttackEvent)(void*, void*, double, int, int) = nullptr;
+static void (*orig_checkTriggerAttackEvent)(void*, void*, double, int, int)      = nullptr;
+static void* (*orig_changeHealthWithTarget)(void*, void*, double, int, int, int, int) = nullptr;
+static bool  (*orig_canUseChestGemCostNow)(void*, void*, int) = nullptr;
 
-void new_checkPrepareTriggerAttackEvent(void* instance, void* foe, double atkRate, int source, int sourceId) {
-    double modifiedRate = atkRate;
-    if (g_ModConfig.enableDamageMultiplier) modifiedRate *= g_ModConfig.damageMultiplier;
-    if (old_checkPrepareTriggerAttackEvent) old_checkPrepareTriggerAttackEvent(instance, foe, modifiedRate, source, sourceId);
+// ========== Hook 實作 ==========
+
+// 1. 核心傷害倍率
+static void new_checkPrepareTriggerAttackEvent(void* instance, void* foe, double atkRate, int source, int sourceId) {
+    double rate = atkRate;
+    if (g_ModConfig.enableDamageMultiplier) rate *= g_ModConfig.damageMultiplier;
+    if (orig_checkPrepareTriggerAttackEvent) orig_checkPrepareTriggerAttackEvent(instance, foe, rate, source, sourceId);
 }
 
-void new_checkTriggerAttackEvent(void* instance, void* foe, double atkRate, int source, int sourceId) {
-    double modifiedRate = atkRate;
-    if (g_ModConfig.enableDamageMultiplier) modifiedRate *= g_ModConfig.damageMultiplier;
-    if (old_checkTriggerAttackEvent) old_checkTriggerAttackEvent(instance, foe, modifiedRate, source, sourceId);
+// 2. 二次傷害檢查
+static void new_checkTriggerAttackEvent(void* instance, void* foe, double atkRate, int source, int sourceId) {
+    double rate = atkRate;
+    if (g_ModConfig.enableDamageMultiplier) rate *= g_ModConfig.damageMultiplier;
+    if (orig_checkTriggerAttackEvent) orig_checkTriggerAttackEvent(instance, foe, rate, source, sourceId);
 }
 
-void* new_changeHealthWithTarget(void* instance, void* target, double attackRate, int source, int sourceId, int hurtType, int weaponSource) {
-    if (g_ModConfig.enableGodMode) {
-        if (old_changeHealthWithTarget) return old_changeHealthWithTarget(instance, target, 0.0, source, sourceId, hurtType, weaponSource);
-        return nullptr;
-    }
-    return old_changeHealthWithTarget ? old_changeHealthWithTarget(instance, target, attackRate, source, sourceId, hurtType, weaponSource) : nullptr;
+// 3. 無敵 / 血量鎖定
+static void* new_changeHealthWithTarget(void* instance, void* target, double attackRate, int source, int sourceId, int hurtType, int weaponSource) {
+    if (g_ModConfig.enableGodMode)
+        return orig_changeHealthWithTarget ? orig_changeHealthWithTarget(instance, target, 0.0, source, sourceId, hurtType, weaponSource) : nullptr;
+    return orig_changeHealthWithTarget ? orig_changeHealthWithTarget(instance, target, attackRate, source, sourceId, hurtType, weaponSource) : nullptr;
 }
 
-bool new_canUseChestGemCostNow(void* instance, void* itemData, int purchaseCount) {
+// 4. 免費購物 / 抽卡
+static bool new_canUseChestGemCostNow(void* instance, void* itemData, int purchaseCount) {
     if (g_ModConfig.enableFreeShopping) return true;
-    return old_canUseChestGemCostNow ? old_canUseChestGemCostNow(nullptr, nullptr, 0) : false;
+    return orig_canUseChestGemCostNow ? orig_canUseChestGemCostNow(instance, itemData, purchaseCount) : false;
+}
+
+// ========== 初始化 ==========
+static uintptr_t GetUnityBase() {
+    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+        const char* name = _dyld_get_image_name(i);
+        if (name && strstr(name, "UnityFramework")) {
+            return (uintptr_t)_dyld_get_image_header(i);
+        }
+    }
+    return 0;
 }
 
 void InitializeHooks() {
-    uintptr_t base = KMEM::scanner::GetImageBase("UnityFramework");
-    if (!base) base = (uintptr_t)_dyld_get_image_header(0);
+    static bool done = false;
+    if (done) return;
+
+    uintptr_t base = GetUnityBase();
     if (!base) return;
+    done = true;
 
-    KTempVars.Base = base;
+    #define HOOK(off, fn, orig) \
+        MSHookFunction((void*)(base + (off)), (void*)(fn), (void**)&(orig))
 
-    // Use TitanoxHook for hooking - it internally uses Dobby
-    // Hook function signature: + (BOOL)hookStaticFunction:symbol withReplacement:replacement inLibrary:libName outOldFunction:oldFunction
-    
-    // 傷害倍率
-    [TitanoxHook hookStaticFunction:"checkPrepareTriggerAttackEvent" withReplacement:(void*)new_checkPrepareTriggerAttackEvent inLibrary:"UnityFramework" outOldFunction:(void**)&old_checkPrepareTriggerAttackEvent];
-    [TitanoxHook hookStaticFunction:"checkTriggerAttackEvent" withReplacement:(void*)new_checkTriggerAttackEvent inLibrary:"UnityFramework" outOldFunction:(void**)&old_checkTriggerAttackEvent];
-    
-    // 無敵
-    [TitanoxHook hookStaticFunction:"changeHealthWithTarget" withReplacement:(void*)new_changeHealthWithTarget inLibrary:"UnityFramework" outOldFunction:(void**)&old_changeHealthWithTarget];
-    
-    // 免費購物/抽卡
-    [TitanoxHook hookStaticFunction:"canUseChestGemCostNow" withReplacement:(void*)new_canUseChestGemCostNow inLibrary:"UnityFramework" outOldFunction:(void**)&old_canUseChestGemCostNow];
-}
+    HOOK(OFFSET_CHECK_PREPARE_ATTACK, new_checkPrepareTriggerAttackEvent, orig_checkPrepareTriggerAttackEvent);
+    HOOK(OFFSET_CHECK_TRIGGER_ATTACK, new_checkTriggerAttackEvent,      orig_checkTriggerAttackEvent);
+    HOOK(OFFSET_CHANGE_HEALTH,        new_changeHealthWithTarget,       orig_changeHealthWithTarget);
+    HOOK(OFFSET_CAN_USE_CHEST_GEM,    new_canUseChestGemCostNow,        orig_canUseChestGemCostNow);
 
-__attribute__((constructor))
-static void initializer() {
-    InitializeHooks();
+    #undef HOOK
 }

@@ -200,6 +200,9 @@ static bool MenDeal = true;
         ImGui_ImplMetal_NewFrame(renderPassDescriptor);
         ImGui::NewFrame();
 
+        // 確保 UnityFramework 載入後才掛 Hook (內部有一次性守衛，成本極低)
+        InitializeHooks();
+
         ImFont *font = ImGui::GetFont();
 
         if (font && font->FontSize > 0)
