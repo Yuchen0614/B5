@@ -1,6 +1,9 @@
 *.dylib
 *.o
+*.deb
 .theos/
+packages/
+output/
 .DS_Store
 *.zip
 .vscode/
