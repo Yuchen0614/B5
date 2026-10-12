@@ -25,6 +25,7 @@ jobs:
         run: |
           make clean || true
           make FINALPACKAGE=1
+          make package FINALPACKAGE=1 || true
 
       - name: Collect artifacts
         run: |
