@@ -249,59 +249,94 @@ static int RegionProt(uintptr_t addr) {
     return (int)info.protection;
 }
 
-// ===== 免費購物：啟動時只「讀取」，不改任何程式碼 =====
-static uintptr_t g_FreeShopAddr    = 0;
-static uint32_t  g_FreeShopOrig[2] = { 0, 0 };
-static bool      g_FreeShopApplied = false;
+// ===== 通用「改寫函數開頭」機制 =====
+// 只在函數最前面寫入幾條指令 (例如 ret)，不搬移任何指令、不需要 trampoline。
+// 啟動時只讀取；實際寫入由選單開關觸發。
+#define MAX_FUNC_PATCH 8
 
-static void RefreshFreeShopDiag() {
-    if (g_FreeShopAddr == 0) return;
-    for (int i = 0; i < g_HookDiagCount; i++) {
-        if (g_HookDiag[i].addr != g_FreeShopAddr) continue;
-        HookDiag& d = g_HookDiag[i];
-        d.after     = *(volatile uint32_t*)g_FreeShopAddr;
-        d.installed = (d.before != d.after);
-        d.method    = g_FreeShopApplied ? 3 : 0;
-        d.protAfter = RegionProt(g_FreeShopAddr);
-        break;
+struct FuncPatch {
+    const char* name;
+    uint32_t    rva;
+    uintptr_t   addr;
+    uint32_t    orig[2];    // 原始前 8 bytes
+    uint32_t    code[2];    // 要寫入的內容
+    int         len;        // 覆蓋長度 (4 或 8)
+    bool        applied;
+    int         diagIdx;
+};
+
+static FuncPatch g_FuncPatch[MAX_FUNC_PATCH];
+static int       g_FuncPatchCount = 0;
+
+static int AddFuncPatch(const char* name, uint32_t rva, const void* code, int len) {
+    if (g_FuncPatchCount >= MAX_FUNC_PATCH) return -1;
+    if (len > 8) len = 8;
+
+    FuncPatch& p = g_FuncPatch[g_FuncPatchCount];
+    p.name    = name;
+    p.rva     = rva;
+    p.addr    = g_BaseAddr + rva;
+    p.len     = len;
+    p.applied = false;
+    p.diagIdx = -1;
+    memset(p.orig, 0, sizeof(p.orig));
+    memset(p.code, 0, sizeof(p.code));
+    memcpy(p.code, code, len);
+
+    if (g_HookDiagCount < MAX_HOOK_DIAG) {
+        int di = g_HookDiagCount++;
+        HookDiag& d = g_HookDiag[di];
+        d.name = name; d.rva = rva; d.addr = p.addr;
+        d.before = 0; d.after = 0;
+        d.installed = false; d.method = 0; d.msRet = -999;
+        d.protBefore = -1; d.protAfter = -1;
+
+        if (IsExecutable(p.addr)) {
+            d.before     = *(volatile uint32_t*)p.addr;
+            d.protBefore = RegionProt(p.addr);
+            memcpy(p.orig, (void*)p.addr, sizeof(p.orig));
+        }
+        p.diagIdx = di;
     }
+
+    g_FuncPatchCount++;
+    return p.diagIdx;
 }
 
-static void SetupFreeShop() {
-    if (g_HookDiagCount >= MAX_HOOK_DIAG) return;
-
-    uint32_t  rva  = OFFSET_CAN_USE_CHEST_GEM;
-    uintptr_t addr = g_BaseAddr + rva;
-
-    HookDiag& d = g_HookDiag[g_HookDiagCount++];
-    d.name = "canUseChestGemCostNow";
-    d.rva  = rva;
-    d.addr = addr;
-    d.before = 0; d.after = 0;
-    d.installed = false; d.method = 0; d.msRet = -999;
-    d.protBefore = -1; d.protAfter = -1;
-
-    if (!IsExecutable(addr)) return;
-
-    d.before     = *(volatile uint32_t*)addr;
-    d.protBefore = RegionProt(addr);
-    memcpy(g_FreeShopOrig, (void*)addr, sizeof(g_FreeShopOrig));
-    g_FreeShopAddr = addr;
+static void RefreshPatchDiag(FuncPatch& p) {
+    if (p.diagIdx < 0) return;
+    HookDiag& d = g_HookDiag[p.diagIdx];
+    d.after     = *(volatile uint32_t*)p.addr;
+    d.installed = (d.before != d.after);
+    d.method    = p.applied ? 3 : 0;
+    d.protAfter = RegionProt(p.addr);
 }
 
-// 由選單呼叫：on => 寫入 patch, off => 還原原始指令
-void ApplyFreeShop(bool on) {
-    if (g_FreeShopAddr == 0) return;
-    if (on == g_FreeShopApplied) return;
-
+static void TogglePatch(FuncPatch& p, bool on) {
+    if (on == p.applied) return;
     if (on) {
-        uint32_t stub[2] = { 0x52800020u, 0xD65F03C0u };   // mov w0, #1 ; ret
-        g_FreeShopApplied = RawWrite(g_FreeShopAddr, stub, 8);
+        p.applied = RawWrite(p.addr, p.code, p.len);
     } else {
-        RawWrite(g_FreeShopAddr, g_FreeShopOrig, 8);
-        g_FreeShopApplied = false;
+        RawWrite(p.addr, p.orig, p.len);
+        p.applied = false;
     }
-    RefreshFreeShopDiag();
+    RefreshPatchDiag(p);
+}
+
+// 免費購物 / 資源不減 (不含 write-test 那項)
+void ApplyFreeShop(bool on) {
+    for (int i = 0; i < g_FuncPatchCount; i++) {
+        if (g_FuncPatch[i].name && strstr(g_FuncPatch[i].name, "write-test")) continue;
+        TogglePatch(g_FuncPatch[i], on);
+    }
+}
+
+// 純寫入測試：寫入的內容跟原本一模一樣 → 遊戲行為完全不變
+void ApplyWriteTest(bool on) {
+    for (int i = 0; i < g_FuncPatchCount; i++) {
+        if (!g_FuncPatch[i].name || !strstr(g_FuncPatch[i].name, "write-test")) continue;
+        TogglePatch(g_FuncPatch[i], on);
+    }
 }
 
 void InitializeHooks() {
@@ -331,8 +366,27 @@ void InitializeHooks() {
     //       不是無敵，還會抵銷傷害倍率 → 本輪先不掛，改用 HeroIns 的無敵欄位。
     // DoHook("changeHealthWithTarget", OFFSET_CHANGE_HEALTH,
     //        (void*)new_changeHealthWithTarget, (void**)&orig_changeHealthWithTarget);
-    // ---- 免費購物/抽卡 ----
-    // 啟動時「只讀取、不修改」，避免影響遊戲啟動流程。
-    // 真的要修改，由使用者在選單勾選 → ApplyFreeShop(true)。
-    SetupFreeShop();
+    // ---- 免費購物 / 資源不減 ----
+    // 讓「扣資源」的函數直接 return，不搬移任何指令、不需 trampoline。
+    //   ret = 0xD65F03C0
+    {
+        uint32_t retInsn = 0xD65F03C0u;
+        AddFuncPatch("costResource (ret)", OFFSET_COST_RESOURCE, &retInsn, 4);
+        AddFuncPatch("costGold (ret)",     OFFSET_COST_GOLD,     &retInsn, 4);
+        AddFuncPatch("costGem (ret)",      OFFSET_COST_GEM,      &retInsn, 4);
+    }
+
+    // ---- 純寫入測試 (write-test) ----
+    // 這一項寫入的內容與原始內容完全相同 → 語意零改變。
+    // 若「只開這一項」也閃退，代表問題在「寫入程式碼」本身，而非我們改的內容。
+    {
+        uint32_t tmp = 0;
+        int ti = AddFuncPatch("canUseChestGemCostNow (write-test)",
+                              OFFSET_CAN_USE_CHEST_GEM, &tmp, 4);
+        for (int i = 0; i < g_FuncPatchCount; i++) {
+            if (g_FuncPatch[i].diagIdx != ti) continue;
+            memcpy(g_FuncPatch[i].code, g_FuncPatch[i].orig, 4);
+            break;
+        }
+    }
 }

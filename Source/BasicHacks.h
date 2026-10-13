@@ -11,13 +11,19 @@
 #define OFFSET_CHANGE_HEALTH 0x2EDD630             // changeHealthWithTarget(Foe, double attackRate, int source, int sourceId, int hurtType, int weaponSource)
 #define OFFSET_CAN_USE_CHEST_GEM 0x27D1124         // canUseChestGemCostNow(StoreItemData, int) -> bool
 
-#define MAX_HOOK_DIAG 4
+// 扣資源的函數 (都回傳 void → 可直接改寫成 ret = 不扣資源 = 免費購物/資源不減)
+#define OFFSET_COST_RESOURCE 0x2763E40             // costResource(int id, double count, RewardChannel)
+#define OFFSET_COST_GOLD     0x27BF2B8             // costGold(double count, RewardChannel)
+#define OFFSET_COST_GEM      0x278C304             // costGem(double count, RewardChannel)
+
+#define MAX_HOOK_DIAG 8
 
 struct ModConfig {
     bool  enableDamageMultiplier = false;
     float damageMultiplier       = 10.0f;
     bool  enableGodMode          = false;
     bool  enableFreeShopping     = false;
+    bool  enableWriteTest        = false;   // 純寫入測試 (寫回原始內容，語意不變)
 };
 
 // 診斷用：記錄每個 hook 掛上去前後的前 4 bytes
@@ -44,7 +50,10 @@ extern uintptr_t g_BaseAddr;
 // 由 MenuLoad 呼叫 (UnityFramework 載入後)
 void InitializeHooks();
 
-// 免費購物：由選單即時切換 (on=寫入 patch, off=還原原始指令)
+// 免費購物/資源不減：由選單即時切換 (on=寫入 patch, off=還原原始指令)
 void ApplyFreeShop(bool on);
+
+// 純寫入測試：把原始位元組寫回去 (語意完全不變)，用來確認「寫入程式碼」本身是否會導致閃退
+void ApplyWriteTest(bool on);
 
 #endif // BASIC_HACKS_H

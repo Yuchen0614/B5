@@ -62,16 +62,16 @@ void UserMenu::DrawMenu()
 
             ImGui::Separator();
 
-            // 免費購物：勾選的當下才會寫入程式碼，取消勾選會還原
-            ImGui::Checkbox("免費購物/抽卡 (勾選即時生效)", &g_ModConfig.enableFreeShopping);
+            // 免費購物/資源不減：讓 costGem / costGold / costResource 直接 return
+            ImGui::Checkbox("免費購物 / 資源不減 (勾選即時生效)", &g_ModConfig.enableFreeShopping);
             ApplyFreeShop(g_ModConfig.enableFreeShopping);
 
-            if (g_ModConfig.enableFreeShopping) {
-                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f),
-                                   "已寫入 patch。此時若閃退，就是這個改動造成的。");
-            } else {
-                ImGui::TextDisabled("未修改程式碼 (目前為乾淨狀態)");
-            }
+            ImGui::TextDisabled("作法: 讓扣資源的函數直接 return (不搬移指令)");
+
+            // 純寫入測試：寫回原始內容，語意完全不變
+            ImGui::Checkbox("診斷: 只寫入不改語意 (write-test)", &g_ModConfig.enableWriteTest);
+            ApplyWriteTest(g_ModConfig.enableWriteTest);
+            ImGui::TextDisabled("若連這個也會閃退 => 問題在「寫入程式碼」本身");
         }
 
         ImGui::Separator();
