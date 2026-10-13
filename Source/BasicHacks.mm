@@ -2,6 +2,7 @@
 #include <substrate.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
+#include <mach/mach_vm.h>
 #include <mach/vm_map.h>
 #include <libkern/OSCacheControl.h>
 #include <string.h>
@@ -183,8 +184,8 @@ static void DoHook(const char* name, uint32_t rva, void* fn, void** orig) {
 
     d.before = *(volatile uint32_t*)addr;
 
-    // ---- 方法 1: MSHookFunction ----
-    d.msRet = MSHookFunction((void*)addr, fn, orig);
+    // ---- 方法 1: MSHookFunction (Theos 的 substrate 回傳 void，無回傳值可判斷) ----
+    MSHookFunction((void*)addr, fn, orig);
     d.after = *(volatile uint32_t*)addr;
     if (d.before != d.after) {
         d.installed = true;
