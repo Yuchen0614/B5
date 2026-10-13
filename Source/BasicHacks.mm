@@ -1,9 +1,17 @@
 #include "BasicHacks.h"
 #include <substrate.h>
 #include <mach-o/dyld.h>
+#include <mach/mach.h>
 #include <string.h>
+#include <stdio.h>
 
 ModConfig g_ModConfig;
+
+// ========== 診斷資訊 (顯示在選單上) ==========
+HookDiag  g_HookDiag[MAX_HOOK_DIAG];
+int       g_HookDiagCount = 0;
+char      g_BaseImage[512] = {0};
+uintptr_t g_BaseAddr = 0;
 
 // ========== 原始函數指標 ==========
 static void (*orig_checkPrepareTriggerAttackEvent)(void*, void*, double, int, int) = nullptr;
@@ -41,31 +49,90 @@ static bool new_canUseChestGemCostNow(void* instance, void* itemData, int purcha
 }
 
 // ========== 初始化 ==========
-static uintptr_t GetUnityBase() {
+
+// 確認位址落在可讀+可執行的記憶體區段，避免掛到爛位址直接閃退
+static bool IsExecutable(uintptr_t addr) {
+    vm_address_t region = (vm_address_t)addr;
+    vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t obj = MACH_PORT_NULL;
+    kern_return_t kr = vm_region_64(mach_task_self(), &region, &size,
+                                    VM_REGION_BASIC_INFO_64,
+                                    (vm_region_info_t)&info, &count, &obj);
+    if (kr != KERN_SUCCESS) return false;
+    if (addr < region || addr >= region + size) return false;
+    return (info.protection & (VM_PROT_READ | VM_PROT_EXECUTE)) == (VM_PROT_READ | VM_PROT_EXECUTE);
+}
+
+// 1) 先找 UnityFramework image；2) 退回主執行檔 (il2cpp 靜態連結的情況)。
+//    重點：主執行檔只有在「base + 代表RVA 落在可執行區段」時才採用，
+//    否則代表 UnityFramework 只是還沒載入，回傳 0 讓下一幀重試 (避免鎖死錯誤 base)。
+static uintptr_t PickBase(const char** outName) {
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
-        const char* name = _dyld_get_image_name(i);
-        if (name && strstr(name, "UnityFramework")) {
-            return (uintptr_t)_dyld_get_image_header(i);
+        const char* n = _dyld_get_image_name(i);
+        if (n && strstr(n, "UnityFramework")) {
+            uintptr_t b = (uintptr_t)_dyld_get_image_header(i);
+            if (b && IsExecutable(b + OFFSET_CHECK_PREPARE_ATTACK)) {
+                if (outName) *outName = n;
+                return b;
+            }
         }
     }
-    return 0;
+    // fallback: 主執行檔
+    const char* m = _dyld_get_image_name(0);
+    uintptr_t b0 = (uintptr_t)_dyld_get_image_header(0);
+    if (m && b0 && IsExecutable(b0 + OFFSET_CHECK_PREPARE_ATTACK)) {
+        if (outName) *outName = m;
+        return b0;
+    }
+    return 0;   // 都還不成立 → 下一幀再試
+}
+
+static void DoHook(const char* name, uint32_t rva, void* fn, void** orig) {
+    if (g_HookDiagCount >= MAX_HOOK_DIAG) return;
+
+    uintptr_t addr = g_BaseAddr + rva;
+    HookDiag& d = g_HookDiag[g_HookDiagCount++];
+    d.name = name;
+    d.rva  = rva;
+    d.addr = addr;
+    d.before = 0;
+    d.after  = 0;
+    d.installed = false;
+
+    if (!IsExecutable(addr)) {
+        // 位址不可執行 → 不掛，避免閃退
+        return;
+    }
+
+    d.before = *(volatile uint32_t*)addr;
+    MSHookFunction((void*)addr, fn, orig);
+    d.after  = *(volatile uint32_t*)addr;
+    d.installed = (d.before != d.after);
 }
 
 void InitializeHooks() {
     static bool done = false;
     if (done) return;
 
-    uintptr_t base = GetUnityBase();
-    if (!base) return;
+    const char* imgName = nullptr;
+    uintptr_t base = PickBase(&imgName);
+    if (!base) return;          // 還沒載入，下一幀再試
+
     done = true;
+    g_BaseAddr = base;
+    if (imgName) {
+        strncpy(g_BaseImage, imgName, sizeof(g_BaseImage) - 1);
+        g_BaseImage[sizeof(g_BaseImage) - 1] = '\0';
+    }
 
-    #define HOOK(off, fn, orig) \
-        MSHookFunction((void*)(base + (off)), (void*)(fn), (void**)&(orig))
-
-    HOOK(OFFSET_CHECK_PREPARE_ATTACK, new_checkPrepareTriggerAttackEvent, orig_checkPrepareTriggerAttackEvent);
-    HOOK(OFFSET_CHECK_TRIGGER_ATTACK, new_checkTriggerAttackEvent,      orig_checkTriggerAttackEvent);
-    HOOK(OFFSET_CHANGE_HEALTH,        new_changeHealthWithTarget,       orig_changeHealthWithTarget);
-    HOOK(OFFSET_CAN_USE_CHEST_GEM,    new_canUseChestGemCostNow,        orig_canUseChestGemCostNow);
-
-    #undef HOOK
+    DoHook("checkPrepareTriggerAttackEvent", OFFSET_CHECK_PREPARE_ATTACK,
+           (void*)new_checkPrepareTriggerAttackEvent, (void**)&orig_checkPrepareTriggerAttackEvent);
+    DoHook("checkTriggerAttackEvent", OFFSET_CHECK_TRIGGER_ATTACK,
+           (void*)new_checkTriggerAttackEvent, (void**)&orig_checkTriggerAttackEvent);
+    DoHook("changeHealthWithTarget", OFFSET_CHANGE_HEALTH,
+           (void*)new_changeHealthWithTarget, (void**)&orig_changeHealthWithTarget);
+    DoHook("canUseChestGemCostNow", OFFSET_CAN_USE_CHEST_GEM,
+           (void*)new_canUseChestGemCostNow, (void**)&orig_canUseChestGemCostNow);
 }

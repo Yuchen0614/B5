@@ -9,7 +9,7 @@
 
 void UserMenu::DrawMenu()
 {
-    ImVec2 WindowSize = ImVec2(320, 380);
+    ImVec2 WindowSize = ImVec2(340, 560);
 
     ImGui::SetNextWindowSize(WindowSize, ImGuiCond_Once);
 
@@ -75,10 +75,30 @@ void UserMenu::DrawMenu()
 
         ImGui::Separator();
 
+        // === 診斷 (確認 hook 有沒有真的掛上) ===
+        if (ImGui::CollapsingHeader("🔧 診斷 (Hook 狀態)"))
+        {
+            ImGui::TextWrapped("Base: %s", g_BaseImage[0] ? g_BaseImage : "(未取得)");
+            ImGui::Text("Base Addr: 0x%llX", (unsigned long long)g_BaseAddr);
+
+            if (g_HookDiagCount == 0) {
+                ImGui::TextColored(ImVec4(1,0.5f,0,1), "尚未執行 InitializeHooks()");
+            }
+            for (int i = 0; i < g_HookDiagCount; i++) {
+                HookDiag& d = g_HookDiag[i];
+                ImVec4 c = d.installed ? ImVec4(0,1,0,1) : ImVec4(1,0,0,1);
+                ImGui::TextColored(c, "%s %s", d.installed ? "[OK]" : "[FAIL]", d.name);
+                ImGui::Text("    rva=0x%X addr=0x%llX",
+                            d.rva, (unsigned long long)d.addr);
+                ImGui::Text("    before=0x%08X after=0x%08X", d.before, d.after);
+            }
+        }
+
+        ImGui::Separator();
+
         // === 資訊 ===
         if (ImGui::CollapsingHeader("ℹ️ 資訊"))
         {
-            ImGui::Text("UnityFramework Base: 0x%llX", (unsigned long long)KTempVars.Base);
             ImGui::Text("RVA: 0x2EDD480 (傷害倍率)");
             ImGui::Text("RVA: 0x2EDD4B0 (二次檢查)");
             ImGui::Text("RVA: 0x2EDD630 (無敵/血量)");
