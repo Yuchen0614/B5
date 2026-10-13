@@ -120,11 +120,13 @@ static void RestoreRX(uintptr_t addr, size_t len) {
 
 static bool RawWrite(uintptr_t addr, const void* data, size_t len) {
     if (!MakeWritable(addr, len)) return false;
-    kern_return_t kr = vm_write(mach_task_self(), (vm_address_t)addr,
-                                (vm_offset_t)data, (mach_msg_type_number_t)len);
+    // 注意: 一定要用 memcpy，不要用 vm_write()。
+    // vm_write 是 Mach IPC 式呼叫，會以「頁」為單位讀出再寫回，
+    // 對自己的 task 使用時可能覆蓋同頁的其他內容 → 弄壞程式碼 → 一執行就閃退。
+    memcpy((void*)addr, data, len);
     RestoreRX(addr, len);
     sys_icache_invalidate((void*)addr, len);
-    return kr == KERN_SUCCESS;
+    return true;
 }
 
 // trampoline: 複製被覆蓋的 16 bytes，後面接「跳回 target+16」
@@ -474,6 +476,48 @@ void ApplyFreeShop(bool on) {
     }
 }
 
+// ===== 真正的 inline hook：改寫函數開頭 16 bytes + trampoline 呼叫原函數 =====
+typedef void (*tp_checkPrepare_t)(void*, void*, double, int, int);
+static tp_checkPrepare_t g_TrampCheckPrepare = NULL;
+
+extern "C" void hook_checkPrepare(void* self, void* foe, double atkRate, int source, int sourceId) {
+    if (!g_TrampCheckPrepare) return;
+    double mult = (double)g_ModConfig.damageMultiplier;
+    if (mult < 1.0) mult = 1.0;
+    g_TrampCheckPrepare(self, foe, atkRate * mult, source, sourceId);
+}
+
+static bool g_DamageHookInstalled = false;
+
+void ApplyDamageHook(bool on) {
+    if (on == g_DamageHookInstalled) return;
+
+    if (on) {
+        uintptr_t addr = g_BaseAddr + OFFSET_CHECK_PREPARE_ATTACK;
+        if (InstallInlineHook(addr, (void*)hook_checkPrepare, (void**)&g_TrampCheckPrepare)) {
+            g_DamageHookInstalled = true;
+        }
+    } else {
+        // 不還原程式碼（避免再寫一次），直接把倍率設回 1.0 即等效關閉
+        g_ModConfig.damageMultiplier = 1.0f;
+        g_DamageHookInstalled = false;
+    }
+}
+
+// ===== 寫入測試：把程式碼頁的原始 4 bytes 原封不動寫回去 =====
+// 內容完全不變 → 只有「寫入程式碼頁」這個動作被執行。
+// 若這樣也會閃退，代表問題在寫入機制；若不會，代表可以正常改程式碼。
+static bool g_WriteTestDone = false;
+
+void ApplyWriteTest(bool on) {
+    if (!on || g_WriteTestDone) return;
+
+    uintptr_t addr  = g_BaseAddr + OFFSET_CHECK_PREPARE_ATTACK;
+    uint32_t  orig  = *(volatile uint32_t*)addr;
+    RawWrite(addr, &orig, 4);      // 寫回相同內容
+    g_WriteTestDone = true;
+}
+
 void InitializeHooks() {
     static bool done = false;
     if (done) return;
@@ -502,10 +546,8 @@ void InitializeHooks() {
     // DoHook("changeHealthWithTarget", OFFSET_CHANGE_HEALTH,
     //        (void*)new_changeHealthWithTarget, (void**)&orig_changeHealthWithTarget);
     // ---- 秒殺敵人 ----
-    // 把 checkPrepareTriggerAttackEvent 的 methodPointer 換成 rep_checkPrepare()，
-    // 它會把 atkRate 放大後再呼叫原函數 (原函數指標在替換時存起來)。
-    AddPtrPatch("checkPrepareTriggerAttackEvent", OFFSET_CHECK_PREPARE_ATTACK,
-                (void*)rep_checkPrepare, (uintptr_t*)&g_OrigCheckPrepare);
+    // 改用「真正的 inline hook」：ApplyDamageHook() 會改寫函數開頭 16 bytes 並建立 trampoline。
+    // (先前用 methodPointer 替換無效 —— il2cpp 對這些方法是「直接呼叫」，不經過指標表。)
 
     // ---- 免費購物 / 資源不減 ----
     // 把「扣資源」方法在資料段的方法指標，換成 rep_noop() → 等於整個方法變成空函數。

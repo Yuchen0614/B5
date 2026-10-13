@@ -55,7 +55,10 @@ void InitializeHooks();
 // 免費購物/資源不減：由選單即時切換 (改資料段的 methodPointer，不碰程式碼頁)
 void ApplyFreeShop(bool on);
 
-// 秒殺敵人：把 checkPrepareTriggerAttackEvent 的 methodPointer 換成「放大攻擊力後呼叫原函數」
-void ApplyDamageMultiplier(bool on);
+// 秒殺敵人：真正的 inline hook (改寫程式碼開頭 + trampoline)
+void ApplyDamageHook(bool on);
+
+// 寫入測試：把程式碼頁原始內容原封不動寫回去 (語意不變)，用來確認寫入機制是否安全
+void ApplyWriteTest(bool on);
 
 #endif // BASIC_HACKS_H

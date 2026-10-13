@@ -53,8 +53,14 @@ void UserMenu::DrawMenu()
             ImGui::SameLine(); if (ImGui::Button("1000x")) g_ModConfig.damageMultiplier = 1000.0f;
             ImGui::SameLine(); if (ImGui::Button("10000x")) g_ModConfig.damageMultiplier = 10000.0f;
 
-            ImGui::Checkbox("秒殺敵人 (攻擊力放大, 勾選即時生效)", &g_ModConfig.enableDamageMultiplier);
-            ApplyDamageMultiplier(g_ModConfig.enableDamageMultiplier);
+            // ① 先測這個：把程式碼頁的原始內容原封不動寫回去 (語意完全不變)
+            ImGui::Checkbox("1) 寫入測試 (不改內容)", &g_ModConfig.enableWriteTest);
+            ApplyWriteTest(g_ModConfig.enableWriteTest);
+            ImGui::TextDisabled("   若這個就閃退 => 寫入機制本身有問題");
+
+            // ② 真正的秒殺 hook
+            ImGui::Checkbox("2) 秒殺敵人 (勾選即時生效)", &g_ModConfig.enableDamageMultiplier);
+            ApplyDamageHook(g_ModConfig.enableDamageMultiplier);
 
             ImGui::Separator();
 
