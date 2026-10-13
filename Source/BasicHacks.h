@@ -39,6 +39,7 @@ struct HookDiag {
     int         protBefore; // 該頁修改前的保護旗標 (VM_PROT_*)
     int         protAfter;  // 該頁修改後的保護旗標 (VM_PROT_*)
     int         matchCount; // 指標替換法: 找到幾個符合的指標 (1 = 正常)
+    int         runtimeCount; // 執行期記憶體中找到幾個符合的指標 (才是真正在用的)
 };
 
 extern struct ModConfig g_ModConfig;

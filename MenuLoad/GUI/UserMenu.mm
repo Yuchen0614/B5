@@ -92,7 +92,8 @@ void UserMenu::DrawMenu()
                                   : (d.method == 3) ? "patch"
                                   : (d.method == 4) ? "ptr" : "NONE";
                 ImGui::Text("    method=%s", mname);
-                ImGui::Text("    pointer matches = %d  (需為 1 才會生效)", d.matchCount);
+                ImGui::Text("    bin ptr matches = %d", d.matchCount);
+                ImGui::Text("    runtime ptr replaced = %d", d.runtimeCount);
                 ImGui::Text("    原始位址=0x%llX", (unsigned long long)d.addr);
             }
         }

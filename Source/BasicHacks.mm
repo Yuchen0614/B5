@@ -255,6 +255,7 @@ static int RegionProt(uintptr_t addr) {
 // 把那個「指標」換成我們自己的函數，就等於換掉整個方法，
 // 而且改的是可寫入的資料頁 → 不會踩到 iOS 對可執行程式碼頁的保護。
 #define MAX_PTR_PATCH 8
+#define MAX_RT_SLOTS  16
 
 struct PtrPatch {
     const char* name;
@@ -262,7 +263,9 @@ struct PtrPatch {
     uintptr_t   target;   // base + rva (原本的函數位址)
     void*       repl;     // 要換成的函數
     uintptr_t*  origOut;  // 套用時把原始位址寫到這裡 (供「呼叫原函數」用)
-    int         matches;  // 在資料段找到幾個符合的指標
+    int         matches;  // 在二進位資料段找到幾個符合的指標
+    uintptr_t   rtSlots[MAX_RT_SLOTS];  // 執行期記憶體中實際改掉的位置
+    int         rtCount;
     bool        applied;
     int         diagIdx;
 };
@@ -337,6 +340,7 @@ static int AddPtrPatch(const char* name, uint32_t rva, void* repl, uintptr_t* or
     p.repl    = repl;
     p.origOut = origOut;
     p.matches = 0;
+    p.rtCount = 0;
     p.applied = false;
     p.diagIdx = -1;
 
@@ -348,6 +352,7 @@ static int AddPtrPatch(const char* name, uint32_t rva, void* repl, uintptr_t* or
         d.installed = false; d.method = 0; d.msRet = -999;
         d.protBefore = -1; d.protAfter = -1;
         d.matchCount = 0;
+        d.runtimeCount = -1;
         p.diagIdx = di;
     }
 
@@ -363,32 +368,91 @@ static int AddPtrPatch(const char* name, uint32_t rva, void* repl, uintptr_t* or
 static void RefreshPtrDiag(PtrPatch& p) {
     if (p.diagIdx < 0) return;
     HookDiag& d = g_HookDiag[p.diagIdx];
-    d.installed  = p.applied;
-    d.method     = p.applied ? 4 : 0;    // 4 = 指標替換
-    d.matchCount = p.matches;
+    d.installed    = p.applied;
+    d.method       = p.applied ? 4 : 0;    // 4 = 指標替換
+    d.matchCount   = p.matches;
+    d.runtimeCount = p.rtCount;
+}
+
+// 掃描「執行期記憶體」(堆積 / 可寫入資料)，找出真正在用的指標。
+// pass 0 = 只掃可寫入且不可執行 ; pass 1 = 再加可讀不可執行
+static int ScanRuntime(uintptr_t target, uintptr_t* out, int maxOut, int pass) {
+    int n = 0;
+    vm_address_t addr = 0;
+    uintptr_t budget = (uintptr_t)768 * 1024 * 1024;   // 最多掃 768MB，避免卡住 UI
+
+    while (n < maxOut && budget > 0) {
+        vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+
+        kern_return_t kr = vm_region_64(mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
+                                        (vm_region_info_t)&info, &count, &object);
+        if (kr != KERN_SUCCESS) break;
+        if (size == 0) break;
+
+        bool exec = (info.protection & VM_PROT_EXECUTE) != 0;
+        bool writ = (info.protection & VM_PROT_WRITE) != 0;
+        bool rd   = (info.protection & VM_PROT_READ) != 0;
+        bool use  = (!exec) && ((pass == 0) ? writ : rd);
+
+        if (use && size >= 8) {
+            budget = (budget > (uintptr_t)size) ? budget - (uintptr_t)size : 0;
+            uintptr_t s = (uintptr_t)addr;
+            uintptr_t e = s + (uintptr_t)size;
+            for (uintptr_t a = s; a + 8 <= e; a += 8) {
+                if (*(volatile uintptr_t*)a == target) {
+                    if (n < maxOut) out[n] = a;
+                    n++;
+                    if (n >= maxOut) break;
+                }
+            }
+        }
+        addr += size;
+    }
+    return n;
 }
 
 static void TogglePtrPatch(PtrPatch& p, bool on) {
     if (on == p.applied) return;
 
-    // 安全檢查：必須「剛好只有一個」符合的指標才動它
-    if (p.matches != 1) return;
+    if (p.origOut) *p.origOut = p.target;   // 原函數位址就是 base + rva
 
-    uintptr_t slots[16];
-    int n = FindPointerSlots(p.target, slots, 16);
-    if (n != 1) return;
-
-    uintptr_t val;
     if (on) {
-        uintptr_t cur = *(volatile uintptr_t*)slots[0];
-        if (p.origOut) *p.origOut = (cur ? cur : p.target);   // 記住原函數位址
-        val = (uintptr_t)p.repl;
-    } else {
-        if (p.origOut) *p.origOut = 0;
-        val = p.target;
-    }
+        // ---- 1) 執行期記憶體 (MethodInfo->methodPointer 等，真正在用的) ----
+        p.rtCount = ScanRuntime(p.target, p.rtSlots, MAX_RT_SLOTS, 0);
+        if (p.rtCount == 0) p.rtCount = ScanRuntime(p.target, p.rtSlots, MAX_RT_SLOTS, 1);
 
-    if (RawWrite(slots[0], &val, 8)) p.applied = on;
+        uintptr_t rv = (uintptr_t)p.repl;
+        for (int i = 0; i < p.rtCount && i < MAX_RT_SLOTS; i++) {
+            RawWrite(p.rtSlots[i], &rv, 8);
+        }
+
+        // ---- 2) 二進位資料段的指標表 (il2cpp 初始化的來源) ----
+        if (p.matches == 1) {
+            uintptr_t slots[16];
+            if (FindPointerSlots(p.target, slots, 16) == 1) {
+                RawWrite(slots[0], &rv, 8);
+            }
+        }
+        p.applied = true;
+    } else {
+        uintptr_t ov = p.target;
+        for (int i = 0; i < p.rtCount && i < MAX_RT_SLOTS; i++) {
+            RawWrite(p.rtSlots[i], &ov, 8);
+        }
+        p.rtCount = 0;
+
+        if (p.matches == 1) {
+            uintptr_t slots[16];
+            if (FindPointerSlots(p.target, slots, 16) == 1) {
+                RawWrite(slots[0], &ov, 8);
+            }
+        }
+        if (p.origOut) *p.origOut = 0;
+        p.applied = false;
+    }
     RefreshPtrDiag(p);
 }
 
