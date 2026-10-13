@@ -9,7 +9,7 @@
 
 void UserMenu::DrawMenu()
 {
-    ImVec2 WindowSize = ImVec2(340, 560);
+    ImVec2 WindowSize = ImVec2(340, 620);
 
     ImGui::SetNextWindowSize(WindowSize, ImGuiCond_Once);
 
@@ -30,14 +30,14 @@ void UserMenu::DrawMenu()
         KTempVars.MenuSize   = CurrentWindow->Size;
         KTempVars.MenuOrigin = CurrentWindow->Pos;
 
-        ImGui::Text("%s", MYSTIFY("IdleGongfu Mod Menu v1.0").c_str());
+        ImGui::Text("%s", MYSTIFY("IdleGongfu Mod Menu v1.1").c_str());
         ImGui::Separator();
 
         // === 核心戰鬥功能 ===
-        if (ImGui::CollapsingHeader("⚔️ 核心戰鬥功能", ImGuiTreeNodeFlags_DefaultOpen))
+        if (ImGui::CollapsingHeader("核心戰鬥功能", ImGuiTreeNodeFlags_DefaultOpen))
         {
             // 傷害倍率
-            ImGui::Text("⚔️ 傷害倍率");
+            ImGui::Text("傷害倍率 (暫時停用)");
             ImGui::SliderFloat("##DmgMultSlider", &g_ModConfig.damageMultiplier, 1.0f, 1000000.0f, "%.1fx");
             ImGui::SameLine();
             ImGui::PushItemWidth(120);
@@ -54,29 +54,30 @@ void UserMenu::DrawMenu()
             ImGui::SameLine(); if (ImGui::Button("10000x")) g_ModConfig.damageMultiplier = 10000.0f;
 
             ImGui::Checkbox("啟用傷害倍率", &g_ModConfig.enableDamageMultiplier);
-            
-            if (g_ModConfig.damageMultiplier > 1000.0f) {
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "⚠️ 超過 1000x 可能導致遊戲不穩定");
-            }
-            if (g_ModConfig.damageMultiplier > 10000.0f) {
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "💀 極度危險: 可能導致遊戲崩潰");
-            }
 
             ImGui::Separator();
 
             // 無敵模式
-            ImGui::Checkbox("🛡️ 無敵模式 / 血量鎖定", &g_ModConfig.enableGodMode);
+            ImGui::Checkbox("無敵模式 (尚未實作)", &g_ModConfig.enableGodMode);
 
             ImGui::Separator();
 
-            // 免費購物/抽卡
-            ImGui::Checkbox("💰 免費購物/抽卡 (武器300寶石→0, 裝備100寶石→0)", &g_ModConfig.enableFreeShopping);
+            // 免費購物：勾選的當下才會寫入程式碼，取消勾選會還原
+            ImGui::Checkbox("免費購物/抽卡 (勾選即時生效)", &g_ModConfig.enableFreeShopping);
+            ApplyFreeShop(g_ModConfig.enableFreeShopping);
+
+            if (g_ModConfig.enableFreeShopping) {
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f),
+                                   "已寫入 patch。此時若閃退，就是這個改動造成的。");
+            } else {
+                ImGui::TextDisabled("未修改程式碼 (目前為乾淨狀態)");
+            }
         }
 
         ImGui::Separator();
 
         // === 診斷 (確認 hook 有沒有真的掛上) ===
-        if (ImGui::CollapsingHeader("🔧 診斷 (Hook 狀態)"))
+        if (ImGui::CollapsingHeader("診斷 (Hook 狀態)"))
         {
             ImGui::TextWrapped("Base: %s", g_BaseImage[0] ? g_BaseImage : "(未取得)");
             ImGui::Text("Base Addr: 0x%llX", (unsigned long long)g_BaseAddr);
@@ -86,27 +87,29 @@ void UserMenu::DrawMenu()
             }
             for (int i = 0; i < g_HookDiagCount; i++) {
                 HookDiag& d = g_HookDiag[i];
-                ImVec4 c = d.installed ? ImVec4(0,1,0,1) : ImVec4(1,0,0,1);
-                ImGui::TextColored(c, "%s %s", d.installed ? "[OK]" : "[FAIL]", d.name);
+                ImVec4 c = d.installed ? ImVec4(0,1,0,1) : ImVec4(1,0.6f,0,1);
+                ImGui::TextColored(c, "%s %s", d.installed ? "[已修改]" : "[未修改]", d.name);
                 ImGui::Text("    rva=0x%X addr=0x%llX",
                             d.rva, (unsigned long long)d.addr);
                 ImGui::Text("    before=0x%08X after=0x%08X", d.before, d.after);
                 const char* mname = (d.method == 1) ? "MSHook"
                                   : (d.method == 2) ? "manual"
                                   : (d.method == 3) ? "patch" : "NONE";
-                ImGui::Text("    method=%s  msRet=%d", mname, d.msRet);
+                ImGui::Text("    method=%s", mname);
+                ImGui::Text("    page prot 0x%X -> 0x%X", d.protBefore, d.protAfter);
+                ImGui::TextDisabled("    (0x5 = R+X 正常, 0x3 = R+W 不可執行)");
             }
         }
 
         ImGui::Separator();
 
         // === 資訊 ===
-        if (ImGui::CollapsingHeader("ℹ️ 資訊"))
+        if (ImGui::CollapsingHeader("資訊"))
         {
-            ImGui::Text("RVA: 0x2EDD480 (傷害倍率)");
-            ImGui::Text("RVA: 0x2EDD4B0 (二次檢查)");
-            ImGui::Text("RVA: 0x2EDD630 (無敵/血量)");
-            ImGui::Text("RVA: 0x27D1124 (免費購物/抽卡)");
+            ImGui::Text("0x27D1124  canUseChestGemCostNow");
+            ImGui::Text("0x2763E40  costResource");
+            ImGui::Text("0x27BF2B8  costGold");
+            ImGui::Text("0x278C304  costGem");
         }
 
         ImGui::Separator();

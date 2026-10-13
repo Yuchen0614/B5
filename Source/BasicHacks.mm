@@ -236,6 +236,74 @@ static void DoPatch(const char* name, uint32_t rva, const void* code, size_t len
     }
 }
 
+// 取得某位址所在頁面的保護旗標 (VM_PROT_*)
+static int RegionProt(uintptr_t addr) {
+    vm_address_t region = (vm_address_t)addr;
+    vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    kern_return_t kr = vm_region_64(mach_task_self(), &region, &size, VM_REGION_BASIC_INFO_64,
+                                    (vm_region_info_t)&info, &count, &object);
+    if (kr != KERN_SUCCESS) return -1;
+    return (int)info.protection;
+}
+
+// ===== 免費購物：啟動時只「讀取」，不改任何程式碼 =====
+static uintptr_t g_FreeShopAddr    = 0;
+static uint32_t  g_FreeShopOrig[2] = { 0, 0 };
+static bool      g_FreeShopApplied = false;
+
+static void RefreshFreeShopDiag() {
+    if (g_FreeShopAddr == 0) return;
+    for (int i = 0; i < g_HookDiagCount; i++) {
+        if (g_HookDiag[i].addr != g_FreeShopAddr) continue;
+        HookDiag& d = g_HookDiag[i];
+        d.after     = *(volatile uint32_t*)g_FreeShopAddr;
+        d.installed = (d.before != d.after);
+        d.method    = g_FreeShopApplied ? 3 : 0;
+        d.protAfter = RegionProt(g_FreeShopAddr);
+        break;
+    }
+}
+
+static void SetupFreeShop() {
+    if (g_HookDiagCount >= MAX_HOOK_DIAG) return;
+
+    uint32_t  rva  = OFFSET_CAN_USE_CHEST_GEM;
+    uintptr_t addr = g_BaseAddr + rva;
+
+    HookDiag& d = g_HookDiag[g_HookDiagCount++];
+    d.name = "canUseChestGemCostNow";
+    d.rva  = rva;
+    d.addr = addr;
+    d.before = 0; d.after = 0;
+    d.installed = false; d.method = 0; d.msRet = -999;
+    d.protBefore = -1; d.protAfter = -1;
+
+    if (!IsExecutable(addr)) return;
+
+    d.before     = *(volatile uint32_t*)addr;
+    d.protBefore = RegionProt(addr);
+    memcpy(g_FreeShopOrig, (void*)addr, sizeof(g_FreeShopOrig));
+    g_FreeShopAddr = addr;
+}
+
+// 由選單呼叫：on => 寫入 patch, off => 還原原始指令
+void ApplyFreeShop(bool on) {
+    if (g_FreeShopAddr == 0) return;
+    if (on == g_FreeShopApplied) return;
+
+    if (on) {
+        uint32_t stub[2] = { 0x52800020u, 0xD65F03C0u };   // mov w0, #1 ; ret
+        g_FreeShopApplied = RawWrite(g_FreeShopAddr, stub, 8);
+    } else {
+        RawWrite(g_FreeShopAddr, g_FreeShopOrig, 8);
+        g_FreeShopApplied = false;
+    }
+    RefreshFreeShopDiag();
+}
+
 void InitializeHooks() {
     static bool done = false;
     if (done) return;
@@ -263,12 +331,8 @@ void InitializeHooks() {
     //       不是無敵，還會抵銷傷害倍率 → 本輪先不掛，改用 HeroIns 的無敵欄位。
     // DoHook("changeHealthWithTarget", OFFSET_CHANGE_HEALTH,
     //        (void*)new_changeHealthWithTarget, (void**)&orig_changeHealthWithTarget);
-    // ---- 免費購物/抽卡：完全不需 trampoline ----
-    // 直接把 canUseChestGemCostNow 改寫成「永遠回傳 true」：
-    //   mov w0, #1   (0x52800020)
-    //   ret          (0xD65F03C0)
-    {
-        uint32_t stub[2] = { 0x52800020u, 0xD65F03C0u };
-        DoPatch("canUseChestGemCostNow", OFFSET_CAN_USE_CHEST_GEM, stub, sizeof(stub));
-    }
+    // ---- 免費購物/抽卡 ----
+    // 啟動時「只讀取、不修改」，避免影響遊戲啟動流程。
+    // 真的要修改，由使用者在選單勾選 → ApplyFreeShop(true)。
+    SetupFreeShop();
 }
