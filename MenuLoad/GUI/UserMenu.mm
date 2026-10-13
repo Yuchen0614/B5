@@ -91,6 +91,9 @@ void UserMenu::DrawMenu()
                 ImGui::Text("    rva=0x%X addr=0x%llX",
                             d.rva, (unsigned long long)d.addr);
                 ImGui::Text("    before=0x%08X after=0x%08X", d.before, d.after);
+                ImGui::Text("    method=%s  msRet=%d",
+                            d.method == 1 ? "MSHook" : (d.method == 2 ? "manual" : "NONE"),
+                            d.msRet);
             }
         }
 

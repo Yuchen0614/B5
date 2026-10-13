@@ -28,6 +28,8 @@ struct HookDiag {
     uint32_t    before;     // 掛鉤前 4 bytes
     uint32_t    after;      // 掛鉤後 4 bytes
     bool        installed;  // before != after => 真的被改寫了
+    int         method;     // 0=無, 1=MSHookFunction, 2=手動inline
+    int         msRet;      // MSHookFunction 回傳值
 };
 
 extern struct ModConfig g_ModConfig;
