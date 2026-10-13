@@ -38,6 +38,7 @@ struct HookDiag {
     int         msRet;      // MSHookFunction 回傳值
     int         protBefore; // 該頁修改前的保護旗標 (VM_PROT_*)
     int         protAfter;  // 該頁修改後的保護旗標 (VM_PROT_*)
+    int         matchCount; // 指標替換法: 找到幾個符合的指標 (1 = 正常)
 };
 
 extern struct ModConfig g_ModConfig;
@@ -50,10 +51,7 @@ extern uintptr_t g_BaseAddr;
 // 由 MenuLoad 呼叫 (UnityFramework 載入後)
 void InitializeHooks();
 
-// 免費購物/資源不減：由選單即時切換 (on=寫入 patch, off=還原原始指令)
+// 免費購物/資源不減：由選單即時切換 (改資料段的 methodPointer，不碰程式碼頁)
 void ApplyFreeShop(bool on);
-
-// 純寫入測試：把原始位元組寫回去 (語意完全不變)，用來確認「寫入程式碼」本身是否會導致閃退
-void ApplyWriteTest(bool on);
 
 #endif // BASIC_HACKS_H

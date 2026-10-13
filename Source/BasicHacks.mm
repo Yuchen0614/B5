@@ -1,6 +1,7 @@
 #include "BasicHacks.h"
 #include <substrate.h>
 #include <mach-o/dyld.h>
+#include <mach-o/loader.h>
 #include <mach/mach.h>
 #include <mach/vm_map.h>
 #include <libkern/OSCacheControl.h>
@@ -249,93 +250,122 @@ static int RegionProt(uintptr_t addr) {
     return (int)info.protection;
 }
 
-// ===== 通用「改寫函數開頭」機制 =====
-// 只在函數最前面寫入幾條指令 (例如 ret)，不搬移任何指令、不需要 trampoline。
-// 啟動時只讀取；實際寫入由選單開關觸發。
-#define MAX_FUNC_PATCH 8
+// ===== 只改「資料」、完全不碰「程式碼頁」 =====
+// il2cpp 呼叫方法時，是從資料段的 methodPointers 陣列取出函數位址。
+// 把那個「指標」換成我們自己的函數，就等於換掉整個方法，
+// 而且改的是可寫入的資料頁 → 不會踩到 iOS 對可執行程式碼頁的保護。
+#define MAX_PTR_PATCH 8
 
-struct FuncPatch {
+struct PtrPatch {
     const char* name;
     uint32_t    rva;
-    uintptr_t   addr;
-    uint32_t    orig[2];    // 原始前 8 bytes
-    uint32_t    code[2];    // 要寫入的內容
-    int         len;        // 覆蓋長度 (4 或 8)
+    uintptr_t   target;   // base + rva (原本的函數位址)
+    void*       repl;     // 要換成的函數
+    int         matches;  // 在資料段找到幾個符合的指標
     bool        applied;
     int         diagIdx;
 };
 
-static FuncPatch g_FuncPatch[MAX_FUNC_PATCH];
-static int       g_FuncPatchCount = 0;
+static PtrPatch g_PtrPatch[MAX_PTR_PATCH];
+static int      g_PtrPatchCount = 0;
 
-static int AddFuncPatch(const char* name, uint32_t rva, const void* code, int len) {
-    if (g_FuncPatchCount >= MAX_FUNC_PATCH) return -1;
-    if (len > 8) len = 8;
+// 替代函數：什麼都不做 (扣資源的函數都是 void，所以直接 return 即可)
+extern "C" void rep_noop(void*, void*, void*, void*) { }
 
-    FuncPatch& p = g_FuncPatch[g_FuncPatchCount];
+// 掃描 UnityFramework 的「非執行」區段，找出值 == target 的 8 bytes 位置
+static int FindPointerSlots(uintptr_t target, uintptr_t* outSlots, int maxSlots) {
+    int n = 0;
+
+    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+        const struct mach_header* h = _dyld_get_image_header(i);
+        if (!h) continue;
+        if ((uintptr_t)h != g_BaseAddr) continue;      // 只處理 UnityFramework
+
+        intptr_t slide = _dyld_get_image_vmaddr_slide(i);
+        const struct mach_header_64* h64 = (const struct mach_header_64*)h;
+        const struct load_command* lc =
+            (const struct load_command*)((const uint8_t*)h64 + sizeof(struct mach_header_64));
+
+        for (uint32_t c = 0; c < h64->ncmds; c++) {
+            if (lc->cmd == LC_SEGMENT_64) {
+                const struct segment_command_64* seg = (const struct segment_command_64*)lc;
+                // 只看資料區段 (不含可執行區段)
+                if (!(seg->initprot & VM_PROT_EXECUTE) && seg->vmsize > 0) {
+                    uintptr_t start = (uintptr_t)seg->vmaddr + (uintptr_t)slide;
+                    uintptr_t end   = start + (uintptr_t)seg->vmsize;
+                    for (uintptr_t a = start; a + 8 <= end; a += 8) {
+                        if (*(volatile uintptr_t*)a == target) {
+                            if (n < maxSlots) outSlots[n] = a;
+                            n++;
+                        }
+                    }
+                }
+            }
+            lc = (const struct load_command*)((const uint8_t*)lc + lc->cmdsize);
+        }
+        break;
+    }
+    return n;
+}
+
+static int AddPtrPatch(const char* name, uint32_t rva, void* repl) {
+    if (g_PtrPatchCount >= MAX_PTR_PATCH) return -1;
+
+    PtrPatch& p = g_PtrPatch[g_PtrPatchCount];
     p.name    = name;
     p.rva     = rva;
-    p.addr    = g_BaseAddr + rva;
-    p.len     = len;
+    p.target  = g_BaseAddr + rva;
+    p.repl    = repl;
+    p.matches = 0;
     p.applied = false;
     p.diagIdx = -1;
-    memset(p.orig, 0, sizeof(p.orig));
-    memset(p.code, 0, sizeof(p.code));
-    memcpy(p.code, code, len);
 
     if (g_HookDiagCount < MAX_HOOK_DIAG) {
         int di = g_HookDiagCount++;
         HookDiag& d = g_HookDiag[di];
-        d.name = name; d.rva = rva; d.addr = p.addr;
+        d.name = name; d.rva = rva; d.addr = p.target;
         d.before = 0; d.after = 0;
         d.installed = false; d.method = 0; d.msRet = -999;
         d.protBefore = -1; d.protAfter = -1;
-
-        if (IsExecutable(p.addr)) {
-            d.before     = *(volatile uint32_t*)p.addr;
-            d.protBefore = RegionProt(p.addr);
-            memcpy(p.orig, (void*)p.addr, sizeof(p.orig));
-        }
+        d.matchCount = 0;
         p.diagIdx = di;
     }
 
-    g_FuncPatchCount++;
+    // 啟動時只「找」，不寫入
+    uintptr_t slots[16];
+    p.matches = FindPointerSlots(p.target, slots, 16);
+    if (p.diagIdx >= 0) g_HookDiag[p.diagIdx].matchCount = p.matches;
+
+    g_PtrPatchCount++;
     return p.diagIdx;
 }
 
-static void RefreshPatchDiag(FuncPatch& p) {
+static void RefreshPtrDiag(PtrPatch& p) {
     if (p.diagIdx < 0) return;
     HookDiag& d = g_HookDiag[p.diagIdx];
-    d.after     = *(volatile uint32_t*)p.addr;
-    d.installed = (d.before != d.after);
-    d.method    = p.applied ? 3 : 0;
-    d.protAfter = RegionProt(p.addr);
+    d.installed  = p.applied;
+    d.method     = p.applied ? 4 : 0;    // 4 = 指標替換
+    d.matchCount = p.matches;
 }
 
-static void TogglePatch(FuncPatch& p, bool on) {
-    if (on == p.applied) return;
-    if (on) {
-        p.applied = RawWrite(p.addr, p.code, p.len);
-    } else {
-        RawWrite(p.addr, p.orig, p.len);
-        p.applied = false;
-    }
-    RefreshPatchDiag(p);
-}
-
-// 免費購物 / 資源不減 (不含 write-test 那項)
+// 由選單切換：只改資料段的指標
 void ApplyFreeShop(bool on) {
-    for (int i = 0; i < g_FuncPatchCount; i++) {
-        if (g_FuncPatch[i].name && strstr(g_FuncPatch[i].name, "write-test")) continue;
-        TogglePatch(g_FuncPatch[i], on);
-    }
-}
+    for (int i = 0; i < g_PtrPatchCount; i++) {
+        PtrPatch& p = g_PtrPatch[i];
+        if (on == p.applied) continue;
 
-// 純寫入測試：寫入的內容跟原本一模一樣 → 遊戲行為完全不變
-void ApplyWriteTest(bool on) {
-    for (int i = 0; i < g_FuncPatchCount; i++) {
-        if (!g_FuncPatch[i].name || !strstr(g_FuncPatch[i].name, "write-test")) continue;
-        TogglePatch(g_FuncPatch[i], on);
+        // 安全檢查：必須「剛好只有一個」符合的指標才動它
+        if (p.matches != 1) continue;
+
+        uintptr_t slots[16];
+        int n = FindPointerSlots(p.target, slots, 16);
+        if (n != 1) continue;
+
+        uintptr_t val = on ? (uintptr_t)p.repl : p.target;
+        if (RawWrite(slots[0], &val, 8)) {
+            p.applied = on;
+        }
+        RefreshPtrDiag(p);
     }
 }
 
@@ -367,26 +397,9 @@ void InitializeHooks() {
     // DoHook("changeHealthWithTarget", OFFSET_CHANGE_HEALTH,
     //        (void*)new_changeHealthWithTarget, (void**)&orig_changeHealthWithTarget);
     // ---- 免費購物 / 資源不減 ----
-    // 讓「扣資源」的函數直接 return，不搬移任何指令、不需 trampoline。
-    //   ret = 0xD65F03C0
-    {
-        uint32_t retInsn = 0xD65F03C0u;
-        AddFuncPatch("costResource (ret)", OFFSET_COST_RESOURCE, &retInsn, 4);
-        AddFuncPatch("costGold (ret)",     OFFSET_COST_GOLD,     &retInsn, 4);
-        AddFuncPatch("costGem (ret)",      OFFSET_COST_GEM,      &retInsn, 4);
-    }
-
-    // ---- 純寫入測試 (write-test) ----
-    // 這一項寫入的內容與原始內容完全相同 → 語意零改變。
-    // 若「只開這一項」也閃退，代表問題在「寫入程式碼」本身，而非我們改的內容。
-    {
-        uint32_t tmp = 0;
-        int ti = AddFuncPatch("canUseChestGemCostNow (write-test)",
-                              OFFSET_CAN_USE_CHEST_GEM, &tmp, 4);
-        for (int i = 0; i < g_FuncPatchCount; i++) {
-            if (g_FuncPatch[i].diagIdx != ti) continue;
-            memcpy(g_FuncPatch[i].code, g_FuncPatch[i].orig, 4);
-            break;
-        }
-    }
+    // 把「扣資源」方法在資料段的方法指標，換成 rep_noop() → 等於整個方法變成空函數。
+    // 完全不修改任何可執行的程式碼頁。
+    AddPtrPatch("costResource", OFFSET_COST_RESOURCE, (void*)rep_noop);
+    AddPtrPatch("costGold",     OFFSET_COST_GOLD,     (void*)rep_noop);
+    AddPtrPatch("costGem",      OFFSET_COST_GEM,      (void*)rep_noop);
 }

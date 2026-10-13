@@ -62,16 +62,11 @@ void UserMenu::DrawMenu()
 
             ImGui::Separator();
 
-            // 免費購物/資源不減：讓 costGem / costGold / costResource 直接 return
+            // 免費購物/資源不減：替換資料段的方法指標 (完全不碰程式碼頁)
             ImGui::Checkbox("免費購物 / 資源不減 (勾選即時生效)", &g_ModConfig.enableFreeShopping);
             ApplyFreeShop(g_ModConfig.enableFreeShopping);
 
-            ImGui::TextDisabled("作法: 讓扣資源的函數直接 return (不搬移指令)");
-
-            // 純寫入測試：寫回原始內容，語意完全不變
-            ImGui::Checkbox("診斷: 只寫入不改語意 (write-test)", &g_ModConfig.enableWriteTest);
-            ApplyWriteTest(g_ModConfig.enableWriteTest);
-            ImGui::TextDisabled("若連這個也會閃退 => 問題在「寫入程式碼」本身");
+            ImGui::TextDisabled("作法: 替換 methodPointer，不修改程式碼頁");
         }
 
         ImGui::Separator();
@@ -91,13 +86,13 @@ void UserMenu::DrawMenu()
                 ImGui::TextColored(c, "%s %s", d.installed ? "[已修改]" : "[未修改]", d.name);
                 ImGui::Text("    rva=0x%X addr=0x%llX",
                             d.rva, (unsigned long long)d.addr);
-                ImGui::Text("    before=0x%08X after=0x%08X", d.before, d.after);
                 const char* mname = (d.method == 1) ? "MSHook"
                                   : (d.method == 2) ? "manual"
-                                  : (d.method == 3) ? "patch" : "NONE";
+                                  : (d.method == 3) ? "patch"
+                                  : (d.method == 4) ? "ptr" : "NONE";
                 ImGui::Text("    method=%s", mname);
-                ImGui::Text("    page prot 0x%X -> 0x%X", d.protBefore, d.protAfter);
-                ImGui::TextDisabled("    (0x5 = R+X 正常, 0x3 = R+W 不可執行)");
+                ImGui::Text("    pointer matches = %d  (需為 1 才會生效)", d.matchCount);
+                ImGui::Text("    原始位址=0x%llX", (unsigned long long)d.addr);
             }
         }
 
