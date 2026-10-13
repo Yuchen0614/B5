@@ -2,7 +2,6 @@
 #include <substrate.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
 #include <mach/vm_map.h>
 #include <libkern/OSCacheControl.h>
 #include <string.h>
@@ -93,31 +92,33 @@ static uintptr_t PickBase(const char** outName) {
 }
 
 // ================= 手動 arm64 inline hook =================
-// 不依賴 substrate：mach_vm_protect 改成可寫 → 寫入跳轉 → 還原 → flush icache
+// 不依賴 substrate：vm_protect 改成可寫 → vm_write 寫入跳轉 → 還原 → flush icache
+// 注意：iOS SDK 的 <mach/mach_vm.h> 會直接報「mach_vm.h unsupported」，
+//       所以只能用 vm_* 系列 API (vm_protect / vm_write / vm_allocate)。
 #define IOS_PAGE 0x4000
 
 static bool MakeWritable(uintptr_t addr, size_t len) {
-    uintptr_t page = addr & ~(uintptr_t)(IOS_PAGE - 1);
-    size_t span = (addr - page) + len;
-    kern_return_t kr = mach_vm_protect(mach_task_self(), page, span, FALSE,
-                                       VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    vm_address_t page = (vm_address_t)(addr & ~(uintptr_t)(IOS_PAGE - 1));
+    vm_size_t span = (vm_size_t)((addr - (uintptr_t)page) + len);
+    kern_return_t kr = vm_protect(mach_task_self(), page, span, FALSE,
+                                  VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
     if (kr != KERN_SUCCESS) {
-        kr = mach_vm_protect(mach_task_self(), page, span, FALSE,
-                             VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
+        kr = vm_protect(mach_task_self(), page, span, FALSE,
+                        VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
     }
     return kr == KERN_SUCCESS;
 }
 
 static void RestoreRX(uintptr_t addr, size_t len) {
-    uintptr_t page = addr & ~(uintptr_t)(IOS_PAGE - 1);
-    size_t span = (addr - page) + len;
-    mach_vm_protect(mach_task_self(), page, span, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    vm_address_t page = (vm_address_t)(addr & ~(uintptr_t)(IOS_PAGE - 1));
+    vm_size_t span = (vm_size_t)((addr - (uintptr_t)page) + len);
+    vm_protect(mach_task_self(), page, span, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
 }
 
 static bool RawWrite(uintptr_t addr, const void* data, size_t len) {
     if (!MakeWritable(addr, len)) return false;
-    kern_return_t kr = mach_vm_write(mach_task_self(), addr, (vm_offset_t)data,
-                                     (mach_msg_type_number_t)len);
+    kern_return_t kr = vm_write(mach_task_self(), (vm_address_t)addr,
+                                (vm_offset_t)data, (mach_msg_type_number_t)len);
     RestoreRX(addr, len);
     sys_icache_invalidate((void*)addr, len);
     return kr == KERN_SUCCESS;
@@ -126,10 +127,10 @@ static bool RawWrite(uintptr_t addr, const void* data, size_t len) {
 // trampoline: 複製被覆蓋的 16 bytes，後面接「跳回 target+16」
 static uintptr_t MakeTrampoline(uintptr_t target) {
     vm_address_t tramp = 0;
-    if (mach_vm_allocate(mach_task_self(), &tramp, IOS_PAGE, VM_FLAGS_ANYWHERE) != KERN_SUCCESS)
+    if (vm_allocate(mach_task_self(), &tramp, IOS_PAGE, VM_FLAGS_ANYWHERE) != KERN_SUCCESS)
         return 0;
-    if (mach_vm_protect(mach_task_self(), tramp, IOS_PAGE, FALSE,
-                        VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE) != KERN_SUCCESS)
+    if (vm_protect(mach_task_self(), tramp, IOS_PAGE, FALSE,
+                   VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE) != KERN_SUCCESS)
         return 0;
 
     memcpy((void*)tramp, (void*)target, 16);          // 原始 4 條指令
@@ -137,8 +138,8 @@ static uintptr_t MakeTrampoline(uintptr_t target) {
     uint32_t j0 = 0x58000050;                          // ldr x16, #8
     uint32_t j1 = 0xD61F0200;                          // br  x16
     uintptr_t back = target + 16;
-    memcpy((void*)(tramp + 16), &j0, 4);
-    memcpy((void*)(tramp + 20), &j1, 4);
+    memcpy((void*)(tramp + 16), &j0,   4);
+    memcpy((void*)(tramp + 20), &j1,   4);
     memcpy((void*)(tramp + 24), &back, 8);
 
     sys_icache_invalidate((void*)tramp, 32);
