@@ -261,6 +261,7 @@ struct PtrPatch {
     uint32_t    rva;
     uintptr_t   target;   // base + rva (原本的函數位址)
     void*       repl;     // 要換成的函數
+    uintptr_t*  origOut;  // 套用時把原始位址寫到這裡 (供「呼叫原函數」用)
     int         matches;  // 在資料段找到幾個符合的指標
     bool        applied;
     int         diagIdx;
@@ -269,11 +270,23 @@ struct PtrPatch {
 static PtrPatch g_PtrPatch[MAX_PTR_PATCH];
 static int      g_PtrPatchCount = 0;
 
-// 替代函數：什麼都不做 (扣資源的函數都是 void，所以直接 return 即可)
+// 替代函數：扣資源 → 什麼都不做
 extern "C" void rep_noop(void*, void*, void*, void*) { }
 
-// 掃描 UnityFramework 的「非執行」區段，找出值 == target 的 8 bytes 位置
-static int FindPointerSlots(uintptr_t target, uintptr_t* outSlots, int maxSlots) {
+// 替代函數：攻擊 → 把 atkRate 放大後再呼叫原函數 (實質秒殺)
+typedef void (*tp_checkPrepare)(void*, void*, double, int, int);
+static tp_checkPrepare g_OrigCheckPrepare = NULL;
+
+extern "C" void rep_checkPrepare(void* self, void* foe, double atkRate, int source, int sourceId) {
+    if (!g_OrigCheckPrepare) return;
+    double mult = (double)g_ModConfig.damageMultiplier;
+    if (mult < 1.0) mult = 1.0;
+    g_OrigCheckPrepare(self, foe, atkRate * mult, source, sourceId);
+}
+
+// 掃描 UnityFramework 區段，找出值 == target 的 8 bytes 位置
+// pass 0 = 只掃資料區段 ; pass 1 = 連程式碼區段一起掃
+static int FindPointerSlotsPass(uintptr_t target, uintptr_t* outSlots, int maxSlots, int pass) {
     int n = 0;
 
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
@@ -289,10 +302,10 @@ static int FindPointerSlots(uintptr_t target, uintptr_t* outSlots, int maxSlots)
         for (uint32_t c = 0; c < h64->ncmds; c++) {
             if (lc->cmd == LC_SEGMENT_64) {
                 const struct segment_command_64* seg = (const struct segment_command_64*)lc;
-                // 只看資料區段 (不含可執行區段)
-                if (!(seg->initprot & VM_PROT_EXECUTE) && seg->vmsize > 0) {
+                bool isExec = (seg->initprot & VM_PROT_EXECUTE) != 0;
+                if (seg->filesize > 0 && ((pass == 0 && !isExec) || (pass == 1 && isExec))) {
                     uintptr_t start = (uintptr_t)seg->vmaddr + (uintptr_t)slide;
-                    uintptr_t end   = start + (uintptr_t)seg->vmsize;
+                    uintptr_t end   = start + (uintptr_t)seg->filesize;
                     for (uintptr_t a = start; a + 8 <= end; a += 8) {
                         if (*(volatile uintptr_t*)a == target) {
                             if (n < maxSlots) outSlots[n] = a;
@@ -308,7 +321,13 @@ static int FindPointerSlots(uintptr_t target, uintptr_t* outSlots, int maxSlots)
     return n;
 }
 
-static int AddPtrPatch(const char* name, uint32_t rva, void* repl) {
+static int FindPointerSlots(uintptr_t target, uintptr_t* outSlots, int maxSlots) {
+    int n = FindPointerSlotsPass(target, outSlots, maxSlots, 0);   // 先掃資料段
+    if (n == 0) n = FindPointerSlotsPass(target, outSlots, maxSlots, 1);  // 找不到才掃程式碼段
+    return n;
+}
+
+static int AddPtrPatch(const char* name, uint32_t rva, void* repl, uintptr_t* origOut) {
     if (g_PtrPatchCount >= MAX_PTR_PATCH) return -1;
 
     PtrPatch& p = g_PtrPatch[g_PtrPatchCount];
@@ -316,6 +335,7 @@ static int AddPtrPatch(const char* name, uint32_t rva, void* repl) {
     p.rva     = rva;
     p.target  = g_BaseAddr + rva;
     p.repl    = repl;
+    p.origOut = origOut;
     p.matches = 0;
     p.applied = false;
     p.diagIdx = -1;
@@ -348,24 +368,45 @@ static void RefreshPtrDiag(PtrPatch& p) {
     d.matchCount = p.matches;
 }
 
-// 由選單切換：只改資料段的指標
+static void TogglePtrPatch(PtrPatch& p, bool on) {
+    if (on == p.applied) return;
+
+    // 安全檢查：必須「剛好只有一個」符合的指標才動它
+    if (p.matches != 1) return;
+
+    uintptr_t slots[16];
+    int n = FindPointerSlots(p.target, slots, 16);
+    if (n != 1) return;
+
+    uintptr_t val;
+    if (on) {
+        uintptr_t cur = *(volatile uintptr_t*)slots[0];
+        if (p.origOut) *p.origOut = (cur ? cur : p.target);   // 記住原函數位址
+        val = (uintptr_t)p.repl;
+    } else {
+        if (p.origOut) *p.origOut = 0;
+        val = p.target;
+    }
+
+    if (RawWrite(slots[0], &val, 8)) p.applied = on;
+    RefreshPtrDiag(p);
+}
+
+// 秒殺敵人
+void ApplyDamageMultiplier(bool on) {
+    for (int i = 0; i < g_PtrPatchCount; i++) {
+        PtrPatch& p = g_PtrPatch[i];
+        if (!p.name || !strstr(p.name, "checkPrepare")) continue;
+        TogglePtrPatch(p, on);
+    }
+}
+
+// 免費購物 / 資源不減
 void ApplyFreeShop(bool on) {
     for (int i = 0; i < g_PtrPatchCount; i++) {
         PtrPatch& p = g_PtrPatch[i];
-        if (on == p.applied) continue;
-
-        // 安全檢查：必須「剛好只有一個」符合的指標才動它
-        if (p.matches != 1) continue;
-
-        uintptr_t slots[16];
-        int n = FindPointerSlots(p.target, slots, 16);
-        if (n != 1) continue;
-
-        uintptr_t val = on ? (uintptr_t)p.repl : p.target;
-        if (RawWrite(slots[0], &val, 8)) {
-            p.applied = on;
-        }
-        RefreshPtrDiag(p);
+        if (!p.name || strstr(p.name, "checkPrepare")) continue;
+        TogglePtrPatch(p, on);
     }
 }
 
@@ -396,10 +437,16 @@ void InitializeHooks() {
     //       不是無敵，還會抵銷傷害倍率 → 本輪先不掛，改用 HeroIns 的無敵欄位。
     // DoHook("changeHealthWithTarget", OFFSET_CHANGE_HEALTH,
     //        (void*)new_changeHealthWithTarget, (void**)&orig_changeHealthWithTarget);
+    // ---- 秒殺敵人 ----
+    // 把 checkPrepareTriggerAttackEvent 的 methodPointer 換成 rep_checkPrepare()，
+    // 它會把 atkRate 放大後再呼叫原函數 (原函數指標在替換時存起來)。
+    AddPtrPatch("checkPrepareTriggerAttackEvent", OFFSET_CHECK_PREPARE_ATTACK,
+                (void*)rep_checkPrepare, (uintptr_t*)&g_OrigCheckPrepare);
+
     // ---- 免費購物 / 資源不減 ----
     // 把「扣資源」方法在資料段的方法指標，換成 rep_noop() → 等於整個方法變成空函數。
     // 完全不修改任何可執行的程式碼頁。
-    AddPtrPatch("costResource", OFFSET_COST_RESOURCE, (void*)rep_noop);
-    AddPtrPatch("costGold",     OFFSET_COST_GOLD,     (void*)rep_noop);
-    AddPtrPatch("costGem",      OFFSET_COST_GEM,      (void*)rep_noop);
+    AddPtrPatch("costResource", OFFSET_COST_RESOURCE, (void*)rep_noop, NULL);
+    AddPtrPatch("costGold",     OFFSET_COST_GOLD,     (void*)rep_noop, NULL);
+    AddPtrPatch("costGem",      OFFSET_COST_GEM,      (void*)rep_noop, NULL);
 }

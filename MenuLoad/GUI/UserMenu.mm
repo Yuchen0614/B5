@@ -53,7 +53,8 @@ void UserMenu::DrawMenu()
             ImGui::SameLine(); if (ImGui::Button("1000x")) g_ModConfig.damageMultiplier = 1000.0f;
             ImGui::SameLine(); if (ImGui::Button("10000x")) g_ModConfig.damageMultiplier = 10000.0f;
 
-            ImGui::Checkbox("啟用傷害倍率", &g_ModConfig.enableDamageMultiplier);
+            ImGui::Checkbox("秒殺敵人 (攻擊力放大, 勾選即時生效)", &g_ModConfig.enableDamageMultiplier);
+            ApplyDamageMultiplier(g_ModConfig.enableDamageMultiplier);
 
             ImGui::Separator();
 
@@ -72,7 +73,7 @@ void UserMenu::DrawMenu()
         ImGui::Separator();
 
         // === 診斷 (確認 hook 有沒有真的掛上) ===
-        if (ImGui::CollapsingHeader("診斷 (Hook 狀態)"))
+        if (ImGui::CollapsingHeader("診斷 (Hook 狀態)", ImGuiTreeNodeFlags_DefaultOpen))
         {
             ImGui::TextWrapped("Base: %s", g_BaseImage[0] ? g_BaseImage : "(未取得)");
             ImGui::Text("Base Addr: 0x%llX", (unsigned long long)g_BaseAddr);

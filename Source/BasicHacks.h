@@ -20,7 +20,7 @@
 
 struct ModConfig {
     bool  enableDamageMultiplier = false;
-    float damageMultiplier       = 10.0f;
+    float damageMultiplier       = 100000.0f;   // 預設放大 10 萬倍 = 實質秒殺
     bool  enableGodMode          = false;
     bool  enableFreeShopping     = false;
     bool  enableWriteTest        = false;   // 純寫入測試 (寫回原始內容，語意不變)
@@ -53,5 +53,8 @@ void InitializeHooks();
 
 // 免費購物/資源不減：由選單即時切換 (改資料段的 methodPointer，不碰程式碼頁)
 void ApplyFreeShop(bool on);
+
+// 秒殺敵人：把 checkPrepareTriggerAttackEvent 的 methodPointer 換成「放大攻擊力後呼叫原函數」
+void ApplyDamageMultiplier(bool on);
 
 #endif // BASIC_HACKS_H
