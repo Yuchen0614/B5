@@ -64,7 +64,9 @@ static bool IsExecutable(uintptr_t addr) {
                                     (vm_region_info_t)&info, &count, &obj);
     if (kr != KERN_SUCCESS) return false;
     if (addr < region || addr >= region + size) return false;
-    return (info.protection & (VM_PROT_READ | VM_PROT_EXECUTE)) == (VM_PROT_READ | VM_PROT_EXECUTE);
+    // 只要可讀即可（可寫性交給 vm_protect 處理；不硬性要求 X，
+    // 避免 VM_PROT_COPY 造成的區段分割誤判）
+    return (info.protection & VM_PROT_READ) != 0;
 }
 
 // 1) 先找 UnityFramework image；2) 退回主執行檔 (il2cpp 靜態連結的情況)。
@@ -204,6 +206,36 @@ static void DoHook(const char* name, uint32_t rva, void* fn, void** orig) {
     }
 }
 
+// 方法 3: 直接改寫函數開頭（不需要呼叫原函數、不需要 trampoline、
+//         完全不搬移任何指令 → 最安全，不會有 PC 相對指令的問題）。
+//         code 必須自帶結尾指令 (ret)。
+static void DoPatch(const char* name, uint32_t rva, const void* code, size_t len) {
+    if (g_HookDiagCount >= MAX_HOOK_DIAG) return;
+
+    uintptr_t addr = g_BaseAddr + rva;
+    HookDiag& d = g_HookDiag[g_HookDiagCount++];
+    d.name = name;
+    d.rva  = rva;
+    d.addr = addr;
+    d.before = 0;
+    d.after  = 0;
+    d.installed = false;
+    d.method = 0;
+    d.msRet  = -999;
+
+    if (!IsExecutable(addr)) return;
+
+    d.before = *(volatile uint32_t*)addr;
+
+    if (RawWrite(addr, code, len)) {
+        d.after = *(volatile uint32_t*)addr;
+        if (d.before != d.after) {
+            d.installed = true;
+            d.method = 3;
+        }
+    }
+}
+
 void InitializeHooks() {
     static bool done = false;
     if (done) return;
@@ -219,15 +251,24 @@ void InitializeHooks() {
         g_BaseImage[sizeof(g_BaseImage) - 1] = '\0';
     }
 
-    DoHook("checkPrepareTriggerAttackEvent", OFFSET_CHECK_PREPARE_ATTACK,
-           (void*)new_checkPrepareTriggerAttackEvent, (void**)&orig_checkPrepareTriggerAttackEvent);
-    DoHook("checkTriggerAttackEvent", OFFSET_CHECK_TRIGGER_ATTACK,
-           (void*)new_checkTriggerAttackEvent, (void**)&orig_checkTriggerAttackEvent);
+    // ---- 傷害倍率：暫時停用 ----
+    // 這兩個需要「呼叫原函數」→ 必須用 trampoline；
+    // 上一版 trampoline 造成「載入到 100% 閃退」，先關掉以確認穩定性。
+    // DoHook("checkPrepareTriggerAttackEvent", OFFSET_CHECK_PREPARE_ATTACK,
+    //        (void*)new_checkPrepareTriggerAttackEvent, (void**)&orig_checkPrepareTriggerAttackEvent);
+    // DoHook("checkTriggerAttackEvent", OFFSET_CHECK_TRIGGER_ATTACK,
+    //        (void*)new_checkTriggerAttackEvent, (void**)&orig_checkTriggerAttackEvent);
     // 注意：changeHealthWithTarget (0x2EDD630) 屬於 HeroBaseAttack，
     //       是「英雄造成傷害」的函數，設 attackRate=0 只會讓玩家打不出傷害，
     //       不是無敵，還會抵銷傷害倍率 → 本輪先不掛，改用 HeroIns 的無敵欄位。
     // DoHook("changeHealthWithTarget", OFFSET_CHANGE_HEALTH,
     //        (void*)new_changeHealthWithTarget, (void**)&orig_changeHealthWithTarget);
-    DoHook("canUseChestGemCostNow", OFFSET_CAN_USE_CHEST_GEM,
-           (void*)new_canUseChestGemCostNow, (void**)&orig_canUseChestGemCostNow);
+    // ---- 免費購物/抽卡：完全不需 trampoline ----
+    // 直接把 canUseChestGemCostNow 改寫成「永遠回傳 true」：
+    //   mov w0, #1   (0x52800020)
+    //   ret          (0xD65F03C0)
+    {
+        uint32_t stub[2] = { 0x52800020u, 0xD65F03C0u };
+        DoPatch("canUseChestGemCostNow", OFFSET_CAN_USE_CHEST_GEM, stub, sizeof(stub));
+    }
 }
