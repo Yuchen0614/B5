@@ -103,6 +103,20 @@ static bool IsReadable(uintptr_t addr, size_t len) {
     return true;
 }
 
+int g_Ch_Scanned = 0;
+
+// 這個指標是否「看起來像一個真的 il2cpp 物件」
+// （可讀 + 8 對齊 + 第 0 欄位是指向可讀記憶體的類別指標）
+static bool LooksLikeObject(void* p) {
+    uintptr_t a = (uintptr_t)p;
+    if (a < 0x10000000 || (a & 7)) return false;
+    if (!IsReadable(a, 0x10)) return false;
+    uintptr_t klass = *(volatile uintptr_t*)a;
+    if (klass < 0x10000000 || (klass & 7)) return false;
+    if (!IsReadable(klass, 0x10)) return false;
+    return true;
+}
+
 // 候選物件是否合理：每個要讀的位址都先驗證過再讀
 static bool PlausibleUnit(uintptr_t obj) {
     if (obj < 0x10000000 || (obj & 7)) return false;
@@ -144,68 +158,81 @@ static bool Cheats_Init() {
     g_Ch_Class_UnitAttr     = (uintptr_t)Il2CppFindClass("", "UnitAttrObject");
     g_Ch_Class_ResourceData = (uintptr_t)Il2CppFindClass("", "ResourceData");
 
-    g_Ch_HeroCount = CollectUnits(g_Ch_Class_HeroIns, g_HeroObjs, 8, 64);
-    g_Ch_FoeCount  = CollectUnits(g_Ch_Class_FoeIns,  g_FoeObjs,  32, 128);
-    {
-        g_Ch_ResCount = g_Ch_Class_ResourceData
-                        ? Il2CppFindInstances(g_Ch_Class_ResourceData, g_ResObjs, 64) : 0;
-    }
+    // 這裡「只」做 API 與類別解析，不掃描、不呼叫任何遊戲方法（最低風險）
+    snprintf(g_Ch_Log, sizeof(g_Ch_Log),
+             "asm=%d 類別: hero=%d foe=%d attr=%d res=%d",
+             g_Il2CppAsmCount,
+             g_Ch_Class_HeroIns ? 1 : 0, g_Ch_Class_FoeIns ? 1 : 0,
+             g_Ch_Class_UnitAttr ? 1 : 0, g_Ch_Class_ResourceData ? 1 : 0);
 
-    if (g_Ch_HeroCount > 0) {
-        g_Ch_HeroObj = g_HeroObjs[0];
-        uintptr_t hp = *(volatile uintptr_t*)(g_Ch_HeroObj + OFF_HU_HEALTHOBJ);
-        g_Ch_HeroHp    = ReadD(hp + OFF_UA_CURR);
-        g_Ch_HeroMaxHp = ReadD(hp + OFF_UA_BASEMAX);
-    }
-
-    // 解析 setCurrentHealth（呼叫遊戲方法用）
-    void* huClass = Il2CppFindClass("", "HealthUnitIns");
-    g_SetCurrentHealth = (fn_setCurrentHealth)Il2CppMethod(huClass, "setCurrentHealth", 2);
+    void* huClass0 = Il2CppFindClass("", "HealthUnitIns");
+    g_SetCurrentHealth = (fn_setCurrentHealth)Il2CppMethod(huClass0, "setCurrentHealth", 2);
     g_Ch_SetHpOk = g_SetCurrentHealth ? 1 : 0;
 
-    // ---- 資源鏈：EducationNode.Instance → get_mainData() → EducationData → resourceData(id) ----
-    {
-        void* eduNodeClass = Il2CppFindClass("", "EducationNode");
-        void* eduDataClass = Il2CppFindClass("", "EducationData");
-        void* rdClass      = Il2CppFindClass("", "ResourceData");
-
-        g_ReloadCount = rdClass ? (fn_reloadCount)Il2CppMethod(rdClass, "reloadCount", 2) : NULL;
-
-        fn_getMainData getMain = eduNodeClass
-            ? (fn_getMainData)Il2CppMethod(eduNodeClass, "get_mainData", 0) : NULL;
-        g_EduNodeInstance = eduNodeClass ? Il2CppStaticFieldPtr(eduNodeClass, "Instance") : NULL;
-        if (g_EduNodeInstance && getMain) g_EduData = getMain(g_EduNodeInstance);
-
-        g_ResourceDataFn = eduDataClass
-            ? (fn_resourceData)Il2CppMethod(eduDataClass, "resourceData", 1) : NULL;
-
-        g_Ch_ResOk = (g_ReloadCount && g_EduData && g_ResourceDataFn) ? 1 : 0;
-
-        snprintf(g_Ch_ResLog, sizeof(g_Ch_ResLog),
-                 "node cls=%d inst=%d eduData=%d reload=%d resFn=%d",
-                 eduNodeClass ? 1 : 0, g_EduNodeInstance ? 1 : 0, g_EduData ? 1 : 0,
-                 g_ReloadCount ? 1 : 0, g_ResourceDataFn ? 1 : 0);
-    }
-
-    // HeroIns.addExp() → 升級
     void* heroCls = Il2CppFindClass("", "HeroIns");
     void* rdCls   = Il2CppFindClass("", "ResourceData");
     g_AddExp = (fn_addExp)Il2CppMethod(heroCls, "addExp", 0);
 
-    // 全部改用「遊戲自己的 getter」讀值（避免欄位語意誤判）
-    g_GetCurrentHealth = (fn_getD)Il2CppMethod(huClass, "get_currentHealth", 0);
-    g_GetMaxHealth     = (fn_getD)Il2CppMethod(huClass, "get_maxHealth", 0);
+    g_GetCurrentHealth = (fn_getD)Il2CppMethod(huClass0, "get_currentHealth", 0);
+    g_GetMaxHealth     = (fn_getD)Il2CppMethod(huClass0, "get_maxHealth", 0);
     g_GetLevel         = (fn_getI)Il2CppMethod(heroCls, "get_level", 0);
     g_GetExp           = (fn_getI)Il2CppMethod(heroCls, "get_exp", 0);
     g_GetCount         = rdCls ? (fn_getD)Il2CppMethod(rdCls, "get_count", 0) : NULL;
     g_GetTotalCount    = rdCls ? (fn_getD)Il2CppMethod(rdCls, "get_totalCount", 0) : NULL;
     g_GetShowCount     = rdCls ? (fn_getD)Il2CppMethod(rdCls, "get_showCount", 0) : NULL;
 
-    snprintf(g_Ch_Log, sizeof(g_Ch_Log),
-             "asm=%d hero=%d foe=%d setHp=%d res=%d addExp=%d",
-             g_Il2CppAsmCount, g_Ch_HeroCount, g_Ch_FoeCount, g_Ch_SetHpOk,
-             g_Ch_ResOk, g_AddExp ? 1 : 0);
     return true;
+}
+
+// ---- 第 2 階段：掃描物件實例（獨立按鈕，重掃很貴）----
+void Cheats_ScanObjects() {
+    if (!g_Ch_ApiOk) return;
+
+    g_Ch_HeroCount = CollectUnits(g_Ch_Class_HeroIns, g_HeroObjs, 8, 64);
+    g_Ch_FoeCount  = CollectUnits(g_Ch_Class_FoeIns,  g_FoeObjs,  32, 128);
+    {
+        g_Ch_ResCount = g_Ch_Class_ResourceData
+                        ? Il2CppFindInstances(g_Ch_Class_ResourceData, g_ResObjs, 64) : 0;
+    }
+    if (g_Ch_HeroCount > 0) {
+        g_Ch_HeroObj = g_HeroObjs[0];
+        g_Ch_Scanned = 1;
+    }
+    snprintf(g_Ch_Log, sizeof(g_Ch_Log),
+             "掃描完成: hero=%d foe=%d res=%d", g_Ch_HeroCount, g_Ch_FoeCount, g_Ch_ResCount);
+}
+
+// ---- 第 3 階段：建立資源鏈（會呼叫遊戲方法，所以每個對象都先驗證）----
+void Cheats_BuildRes() {
+    if (!g_Ch_ApiOk) return;
+
+    void* eduNodeClass = Il2CppFindClass("", "EducationNode");
+    void* eduDataClass = Il2CppFindClass("", "EducationData");
+    void* rdClass      = Il2CppFindClass("", "ResourceData");
+
+    g_ReloadCount = rdClass ? (fn_reloadCount)Il2CppMethod(rdClass, "reloadCount", 2) : NULL;
+
+    fn_getMainData getMain = eduNodeClass
+        ? (fn_getMainData)Il2CppMethod(eduNodeClass, "get_mainData", 0) : NULL;
+
+    g_EduNodeInstance = eduNodeClass ? Il2CppStaticFieldPtr(eduNodeClass, "Instance") : NULL;
+
+    // 關鍵安全檢查：對象必須「看起來像真的物件」才可以呼叫它
+    if (LooksLikeObject(g_EduNodeInstance) && getMain) {
+        g_EduData = getMain(g_EduNodeInstance);
+    }
+
+    g_ResourceDataFn = eduDataClass
+        ? (fn_resourceData)Il2CppMethod(eduDataClass, "resourceData", 1) : NULL;
+
+    g_Ch_ResOk = (g_ReloadCount && LooksLikeObject(g_EduData) && g_ResourceDataFn) ? 1 : 0;
+
+    snprintf(g_Ch_ResLog, sizeof(g_Ch_ResLog),
+             "nodeCls=%d inst=%d(ok=%d) eduData=%d(ok=%d) reload=%d resFn=%d",
+             eduNodeClass ? 1 : 0, g_EduNodeInstance ? 1 : 0,
+             LooksLikeObject(g_EduNodeInstance) ? 1 : 0, g_EduData ? 1 : 0,
+             LooksLikeObject(g_EduData) ? 1 : 0, g_ReloadCount ? 1 : 0,
+             g_ResourceDataFn ? 1 : 0);
 }
 
 static int g_Tick = 0;
@@ -220,11 +247,14 @@ void Cheats_Tick() {
     if (!g_Ch_Armed) return;
 
     if (!g_Ch_ApiOk) {
-        if (g_Ch_InitTries >= 60) return;    // 最多試 60 次，失敗就停，由使用者再按一次
+        if (g_Ch_InitTries >= 5) return;
         g_Ch_InitTries++;
-        Cheats_Init();
+        Cheats_Init();       // 只解析 API 與類別，安全
         return;
     }
+
+    // 還沒按「掃描物件」→ 不套用任何功能
+    if (!g_Ch_Scanned) return;
 
     g_Tick++;
 

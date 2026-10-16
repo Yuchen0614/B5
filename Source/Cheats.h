@@ -23,9 +23,12 @@ extern double    g_Ch_HeroMaxHp;
 extern int       g_Ch_SetHpOk;   // setCurrentHealth 方法是否解析成功
 extern int       g_Ch_InitTries;
 extern int       g_Ch_Armed;      // 使用者是否已按下「接上 il2cpp」→ 在此之前完全不動 il2cpp
+extern int       g_Ch_Scanned;    // 是否已按下「掃描物件」
 
-// 由選單按鈕呼叫：開始接上 il2cpp + 掃描物件（必須在遊戲載入完成後）
-void Cheats_Arm();
+// 由選單按鈕呼叫（共 3 階段，逐步提高風險，方便定位問題）
+void Cheats_Arm();          // 階段1：只接 il2cpp API + 解析類別（最安全）
+void Cheats_ScanObjects();  // 階段2：掃描物件實例
+void Cheats_BuildRes();     // 階段3：建立資源鏈（會呼叫遊戲方法）
 
 // ---- 資源 / 等級 診斷 ----
 extern int       g_Ch_ResOk;      // 資源鏈 (EducationNode→EducationData→ResourceData) 是否成功
