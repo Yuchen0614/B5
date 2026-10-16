@@ -49,6 +49,25 @@ double g_Ch_Gem = 0;
 int    g_Ch_Level = 0;
 int    g_Ch_Exp = 0;
 
+// 用遊戲自己的 getter 讀值
+double g_Ch_HpGet = 0;
+double g_Ch_MaxGet = 0;
+double g_Ch_GoldGet = 0;
+double g_Ch_GoldTot = 0;
+double g_Ch_GoldShow = 0;
+char   g_Ch_Cand[384] = { 0 };
+
+typedef double (*fn_getD)(void* self);
+typedef int    (*fn_getI)(void* self);
+
+static fn_getD g_GetCurrentHealth = NULL;
+static fn_getD g_GetMaxHealth = NULL;
+static fn_getI g_GetLevel = NULL;
+static fn_getI g_GetExp = NULL;
+static fn_getD g_GetCount = NULL;
+static fn_getD g_GetTotalCount = NULL;
+static fn_getD g_GetShowCount = NULL;
+
 #define OFF_RD_CNTOBJ  0x40    // ResourceData.cntObject (NumberObject*)
 #define OFF_NO_DOUBLE  0x10    // NumberObject.doubleValue (double)
 
@@ -169,7 +188,18 @@ static bool Cheats_Init() {
     }
 
     // HeroIns.addExp() → 升級
-    g_AddExp = (fn_addExp)Il2CppMethod(Il2CppFindClass("", "HeroIns"), "addExp", 0);
+    void* heroCls = Il2CppFindClass("", "HeroIns");
+    void* rdCls   = Il2CppFindClass("", "ResourceData");
+    g_AddExp = (fn_addExp)Il2CppMethod(heroCls, "addExp", 0);
+
+    // 全部改用「遊戲自己的 getter」讀值（避免欄位語意誤判）
+    g_GetCurrentHealth = (fn_getD)Il2CppMethod(huClass, "get_currentHealth", 0);
+    g_GetMaxHealth     = (fn_getD)Il2CppMethod(huClass, "get_maxHealth", 0);
+    g_GetLevel         = (fn_getI)Il2CppMethod(heroCls, "get_level", 0);
+    g_GetExp           = (fn_getI)Il2CppMethod(heroCls, "get_exp", 0);
+    g_GetCount         = rdCls ? (fn_getD)Il2CppMethod(rdCls, "get_count", 0) : NULL;
+    g_GetTotalCount    = rdCls ? (fn_getD)Il2CppMethod(rdCls, "get_totalCount", 0) : NULL;
+    g_GetShowCount     = rdCls ? (fn_getD)Il2CppMethod(rdCls, "get_showCount", 0) : NULL;
 
     snprintf(g_Ch_Log, sizeof(g_Ch_Log),
              "asm=%d hero=%d foe=%d setHp=%d res=%d addExp=%d",
@@ -203,11 +233,32 @@ void Cheats_Tick() {
         g_Ch_FoeCount = CollectUnits(g_Ch_Class_FoeIns, g_FoeObjs, 32, 128);
         if (g_Ch_HeroCount == 0)
             g_Ch_HeroCount = CollectUnits(g_Ch_Class_HeroIns, g_HeroObjs, 8, 64);
-        if (g_Ch_HeroCount > 0) {
-            g_Ch_HeroObj = g_HeroObjs[0];
-            g_Ch_Level = *(volatile int*)(g_Ch_HeroObj + OFF_HERO_LEVEL);
-            g_Ch_Exp   = *(volatile int*)(g_Ch_HeroObj + OFF_HERO_EXP);
+    }
+    if (g_Ch_HeroCount > 0) g_Ch_HeroObj = g_HeroObjs[0];
+
+    // ---- 顯示值：全部用遊戲自己的 getter 讀（不會錯位）----
+    if (g_Ch_HeroObj) {
+        if (g_GetCurrentHealth) g_Ch_HpGet  = g_GetCurrentHealth((void*)g_Ch_HeroObj);
+        if (g_GetMaxHealth)     g_Ch_MaxGet = g_GetMaxHealth((void*)g_Ch_HeroObj);
+        if (g_GetLevel)         g_Ch_Level  = g_GetLevel((void*)g_Ch_HeroObj);
+        if (g_GetExp)           g_Ch_Exp    = g_GetExp((void*)g_Ch_HeroObj);
+    }
+
+    // 列出所有 HeroIns 候選（遊戲有盟友/門派，可能有多個 HeroIns）
+    if ((g_Tick % 30) == 0 && g_Ch_HeroCount > 0) {
+        char*  p    = g_Ch_Cand;
+        size_t left = sizeof(g_Ch_Cand);
+        int    n    = 0;
+        for (int i = 0; i < g_Ch_HeroCount && i < 4; i++) {
+            uintptr_t o  = g_HeroObjs[i];
+            int       lv = g_GetLevel ? g_GetLevel((void*)o) : -1;
+            double    hp = g_GetCurrentHealth ? g_GetCurrentHealth((void*)o) : -1.0;
+            int w = snprintf(p, left, "#%d 0x%llX L=%d HP=%.0f\n",
+                             i, (unsigned long long)o, lv, hp);
+            if (w <= 0 || (size_t)w >= left) break;
+            p += w; left -= (size_t)w; n++;
         }
+        if (n == 0) snprintf(g_Ch_Cand, sizeof(g_Ch_Cand), "(無)");
     }
 
     // ---- 無敵：血量鎖在最大值 + 無敵時間拉高 ----
@@ -251,13 +302,15 @@ void Cheats_Tick() {
             if (gem)  g_ReloadCount(gem,  1e8, 0.0);
         }
 
+        // 用遊戲的 getter 讀（先前直接讀 NumberObject 欄位，語意可能不對）
         if (gold) {
-            uintptr_t no = *(volatile uintptr_t*)((uintptr_t)gold + OFF_RD_CNTOBJ);
-            if (no > 0x10000000) g_Ch_Gold = ReadD(no + OFF_NO_DOUBLE);
+            g_Ch_GoldGet  = g_GetCount      ? g_GetCount(gold)      : 0;
+            g_Ch_GoldTot  = g_GetTotalCount ? g_GetTotalCount(gold) : 0;
+            g_Ch_GoldShow = g_GetShowCount  ? g_GetShowCount(gold)  : 0;
+            g_Ch_Gold     = g_Ch_GoldGet;
         }
         if (gem) {
-            uintptr_t no = *(volatile uintptr_t*)((uintptr_t)gem + OFF_RD_CNTOBJ);
-            if (no > 0x10000000) g_Ch_Gem = ReadD(no + OFF_NO_DOUBLE);
+            g_Ch_Gem = g_GetCount ? g_GetCount(gem) : 0;
         }
     }
 

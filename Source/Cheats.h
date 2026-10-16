@@ -35,4 +35,12 @@ extern double    g_Ch_Gem;
 extern int       g_Ch_Level;
 extern int       g_Ch_Exp;
 
+// 改用「遊戲自己的 getter」讀出來的值（絕對不會錯位）
+extern double    g_Ch_HpGet;      // get_currentHealth()
+extern double    g_Ch_MaxGet;     // get_maxHealth()
+extern double    g_Ch_GoldGet;    // ResourceData.get_count()
+extern double    g_Ch_GoldTot;    // ResourceData.get_totalCount()
+extern double    g_Ch_GoldShow;   // ResourceData.get_showCount()
+extern char      g_Ch_Cand[384];  // 所有 HeroIns 候選（位址/等級/血量）
+
 #endif // CHEATS_H

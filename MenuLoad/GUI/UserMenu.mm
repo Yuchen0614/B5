@@ -44,12 +44,14 @@ void UserMenu::DrawMenu()
 
             ImGui::Separator();
 
-            ImGui::Text("玩家血量: %.0f / %.0f", g_Ch_HeroHp, g_Ch_HeroMaxHp);
+            ImGui::Text("血量(getter): %.0f / %.0f", g_Ch_HpGet, g_Ch_MaxGet);
             ImGui::Text("等級 %d   經驗 %d", g_Ch_Level, g_Ch_Exp);
             ImGui::Text("金幣 %.0f   寶石 %.0f", g_Ch_Gold, g_Ch_Gem);
-            ImGui::Text("Hero 物件: 0x%llX  找到 %d 個",
-                        (unsigned long long)g_Ch_HeroObj, g_Ch_HeroCount);
-            ImGui::Text("敵人: %d 個   資源物件: %d 個", g_Ch_FoeCount, g_Ch_ResCount);
+            ImGui::Text("金幣 count/total/show: %.0f / %.0f / %.0f",
+                        g_Ch_GoldGet, g_Ch_GoldTot, g_Ch_GoldShow);
+            ImGui::Text("敵人: %d   資源物件: %d", g_Ch_FoeCount, g_Ch_ResCount);
+            ImGui::Text("HeroIns 候選 (%d 個):", g_Ch_HeroCount);
+            ImGui::TextWrapped("%s", g_Ch_Cand);
         }
 
         ImGui::Separator();
