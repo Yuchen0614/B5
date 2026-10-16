@@ -22,6 +22,9 @@ const char* Il2CppClassName(void* klass);
 // 取得方法指標：MethodInfo 的第 0 個欄位就是 methodPointer
 void* Il2CppMethod(void* klass, const char* name, int argc);
 
+// 讀取靜態欄位（回傳裡面的指標值，例如 EducationNode.Instance）
+void* Il2CppStaticFieldPtr(void* klass, const char* name);
+
 // 在可寫入且不可執行的記憶體中，掃描「第 0 欄位 == klassPtr」的物件。
 // il2cpp 物件的第 0 個欄位就是 Il2CppClass*，所以這就是物件實例。
 int Il2CppFindInstances(uintptr_t klassPtr, uintptr_t* out, int maxOut);

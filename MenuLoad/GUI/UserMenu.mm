@@ -39,13 +39,17 @@ void UserMenu::DrawMenu()
         {
             ImGui::Checkbox("無敵 (血量鎖定)", &g_ModConfig.enableGodMode);
             ImGui::Checkbox("秒殺敵人", &g_ModConfig.enableOneShot);
+            ImGui::Checkbox("無限資源 (金幣/寶石)", &g_ModConfig.enableResources);
+            ImGui::Checkbox("快速升級 (經驗)", &g_ModConfig.enableTenXExp);
 
             ImGui::Separator();
 
             ImGui::Text("玩家血量: %.0f / %.0f", g_Ch_HeroHp, g_Ch_HeroMaxHp);
+            ImGui::Text("等級 %d   經驗 %d", g_Ch_Level, g_Ch_Exp);
+            ImGui::Text("金幣 %.0f   寶石 %.0f", g_Ch_Gold, g_Ch_Gem);
             ImGui::Text("Hero 物件: 0x%llX  找到 %d 個",
                         (unsigned long long)g_Ch_HeroObj, g_Ch_HeroCount);
-            ImGui::Text("敵人: %d 個", g_Ch_FoeCount);
+            ImGui::Text("敵人: %d 個   資源物件: %d 個", g_Ch_FoeCount, g_Ch_ResCount);
         }
 
         ImGui::Separator();
@@ -63,6 +67,7 @@ void UserMenu::DrawMenu()
                         (unsigned long long)g_Ch_Class_UnitAttr,
                         (unsigned long long)g_Ch_Class_ResourceData);
             ImGui::TextWrapped("log: %s", g_Ch_Log);
+            ImGui::TextWrapped("res: %s", g_Ch_ResLog);
             ImGui::Text("setCurrentHealth=%d  嘗試=%d", g_Ch_SetHpOk, g_Ch_InitTries);
         }
 

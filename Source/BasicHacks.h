@@ -25,6 +25,8 @@ struct ModConfig {
     bool  enableFreeShopping     = false;
     bool  enableWriteTest        = false;   // 純寫入測試 (寫回原始內容，語意不變)
     bool  enableOneShot          = false;   // 秒殺敵人 (呼叫 setCurrentHealth(0))
+    bool  enableResources        = false;   // 無限資源 (金幣/寶石)
+    bool  enableTenXExp          = false;   // 快速升級 (呼叫 HeroIns.addExp)
 };
 
 // 診斷用：記錄每個 hook 掛上去前後的前 4 bytes

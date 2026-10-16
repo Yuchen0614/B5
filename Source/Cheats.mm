@@ -37,6 +37,29 @@ static fn_setCurrentHealth g_SetCurrentHealth = NULL;
 
 static uintptr_t g_HeroObjs[8];
 static uintptr_t g_FoeObjs[32];
+static uintptr_t g_ResObjs[64];
+
+// ---- 資源 / 等級 ----
+int    g_Ch_ResOk = 0;
+char   g_Ch_ResLog[192] = { 0 };
+double g_Ch_Gold = 0;
+double g_Ch_Gem = 0;
+int    g_Ch_Level = 0;
+int    g_Ch_Exp = 0;
+
+#define OFF_RD_CNTOBJ  0x40    // ResourceData.cntObject (NumberObject*)
+#define OFF_NO_DOUBLE  0x10    // NumberObject.doubleValue (double)
+
+typedef void  (*fn_reloadCount)(void* self, double count, double addCount);
+typedef void  (*fn_addExp)(void* self);
+typedef void* (*fn_resourceData)(void* self, int id);
+typedef void* (*fn_getMainData)(void* self);
+
+static fn_reloadCount  g_ReloadCount = NULL;
+static fn_addExp       g_AddExp = NULL;
+static fn_resourceData g_ResourceDataFn = NULL;
+static void*           g_EduNodeInstance = NULL;
+static void*           g_EduData = NULL;
 
 static inline void   WriteD(uintptr_t a, double v) { *(volatile double*)a = v; }
 static inline void   WriteF(uintptr_t a, float v)  { *(volatile float*)a  = v; }
@@ -82,9 +105,8 @@ static bool Cheats_Init() {
     g_Ch_HeroCount = CollectUnits(g_Ch_Class_HeroIns, g_HeroObjs, 8, 64);
     g_Ch_FoeCount  = CollectUnits(g_Ch_Class_FoeIns,  g_FoeObjs,  32, 128);
     {
-        uintptr_t tmp[64];
         g_Ch_ResCount = g_Ch_Class_ResourceData
-                        ? Il2CppFindInstances(g_Ch_Class_ResourceData, tmp, 64) : 0;
+                        ? Il2CppFindInstances(g_Ch_Class_ResourceData, g_ResObjs, 64) : 0;
     }
 
     if (g_Ch_HeroCount > 0) {
@@ -99,9 +121,37 @@ static bool Cheats_Init() {
     g_SetCurrentHealth = (fn_setCurrentHealth)Il2CppMethod(huClass, "setCurrentHealth", 2);
     g_Ch_SetHpOk = g_SetCurrentHealth ? 1 : 0;
 
+    // ---- 資源鏈：EducationNode.Instance → get_mainData() → EducationData → resourceData(id) ----
+    {
+        void* eduNodeClass = Il2CppFindClass("", "EducationNode");
+        void* eduDataClass = Il2CppFindClass("", "EducationData");
+        void* rdClass      = Il2CppFindClass("", "ResourceData");
+
+        g_ReloadCount = rdClass ? (fn_reloadCount)Il2CppMethod(rdClass, "reloadCount", 2) : NULL;
+
+        fn_getMainData getMain = eduNodeClass
+            ? (fn_getMainData)Il2CppMethod(eduNodeClass, "get_mainData", 0) : NULL;
+        g_EduNodeInstance = eduNodeClass ? Il2CppStaticFieldPtr(eduNodeClass, "Instance") : NULL;
+        if (g_EduNodeInstance && getMain) g_EduData = getMain(g_EduNodeInstance);
+
+        g_ResourceDataFn = eduDataClass
+            ? (fn_resourceData)Il2CppMethod(eduDataClass, "resourceData", 1) : NULL;
+
+        g_Ch_ResOk = (g_ReloadCount && g_EduData && g_ResourceDataFn) ? 1 : 0;
+
+        snprintf(g_Ch_ResLog, sizeof(g_Ch_ResLog),
+                 "node cls=%d inst=%d eduData=%d reload=%d resFn=%d",
+                 eduNodeClass ? 1 : 0, g_EduNodeInstance ? 1 : 0, g_EduData ? 1 : 0,
+                 g_ReloadCount ? 1 : 0, g_ResourceDataFn ? 1 : 0);
+    }
+
+    // HeroIns.addExp() → 升級
+    g_AddExp = (fn_addExp)Il2CppMethod(Il2CppFindClass("", "HeroIns"), "addExp", 0);
+
     snprintf(g_Ch_Log, sizeof(g_Ch_Log),
-             "asm=%d hero=%d foe=%d setHp=%d",
-             g_Il2CppAsmCount, g_Ch_HeroCount, g_Ch_FoeCount, g_Ch_SetHpOk);
+             "asm=%d hero=%d foe=%d setHp=%d res=%d addExp=%d",
+             g_Il2CppAsmCount, g_Ch_HeroCount, g_Ch_FoeCount, g_Ch_SetHpOk,
+             g_Ch_ResOk, g_AddExp ? 1 : 0);
     return true;
 }
 
@@ -123,7 +173,11 @@ void Cheats_Tick() {
         g_Ch_FoeCount = CollectUnits(g_Ch_Class_FoeIns, g_FoeObjs, 32, 128);
         if (g_Ch_HeroCount == 0)
             g_Ch_HeroCount = CollectUnits(g_Ch_Class_HeroIns, g_HeroObjs, 8, 64);
-        if (g_Ch_HeroCount > 0) g_Ch_HeroObj = g_HeroObjs[0];
+        if (g_Ch_HeroCount > 0) {
+            g_Ch_HeroObj = g_HeroObjs[0];
+            g_Ch_Level = *(volatile int*)(g_Ch_HeroObj + OFF_HERO_LEVEL);
+            g_Ch_Exp   = *(volatile int*)(g_Ch_HeroObj + OFF_HERO_EXP);
+        }
     }
 
     // ---- 無敵：血量鎖在最大值 + 無敵時間拉高 ----
@@ -154,6 +208,40 @@ void Cheats_Tick() {
                 uintptr_t hp = *(volatile uintptr_t*)(g_FoeObjs[i] + OFF_HU_HEALTHOBJ);
                 if (hp >= 0x10000000) WriteD(hp + OFF_UA_CURR, 0.0);
             }
+        }
+    }
+
+    // ---- 無限資源：呼叫 ResourceData.reloadCount 設定金幣/寶石 ----
+    if (g_Ch_ResOk) {
+        void* gold = g_ResourceDataFn(g_EduData, 1);   // Resource.Gold = 1
+        void* gem  = g_ResourceDataFn(g_EduData, 2);   // Resource.Gem  = 2
+
+        if (g_ModConfig.enableResources && (g_Tick % 60) == 0) {
+            if (gold) g_ReloadCount(gold, 1e8, 0.0);
+            if (gem)  g_ReloadCount(gem,  1e8, 0.0);
+        }
+
+        if (gold) {
+            uintptr_t no = *(volatile uintptr_t*)((uintptr_t)gold + OFF_RD_CNTOBJ);
+            if (no > 0x10000000) g_Ch_Gold = ReadD(no + OFF_NO_DOUBLE);
+        }
+        if (gem) {
+            uintptr_t no = *(volatile uintptr_t*)((uintptr_t)gem + OFF_RD_CNTOBJ);
+            if (no > 0x10000000) g_Ch_Gem = ReadD(no + OFF_NO_DOUBLE);
+        }
+    }
+
+    // ---- 快速升級：呼叫 HeroIns.addExp() ----
+    if (g_ModConfig.enableTenXExp && g_Ch_HeroCount > 0 && g_AddExp && (g_Tick % 3) == 0) {
+        for (int i = 0; i < g_Ch_HeroCount; i++) {
+            int lv = *(volatile int*)(g_HeroObjs[i] + OFF_HERO_LEVEL);
+            if (lv > 0 && lv < 99999) {
+                for (int k = 0; k < 5; k++) g_AddExp((void*)g_HeroObjs[i]);
+            }
+        }
+        if (g_Ch_HeroObj) {
+            g_Ch_Level = *(volatile int*)(g_Ch_HeroObj + OFF_HERO_LEVEL);
+            g_Ch_Exp   = *(volatile int*)(g_Ch_HeroObj + OFF_HERO_EXP);
         }
     }
 }

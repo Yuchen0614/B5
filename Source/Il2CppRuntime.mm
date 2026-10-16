@@ -20,6 +20,8 @@ typedef void*  (*fn_class_from_name)(void* image, const char* ns, const char* na
 typedef const char* (*fn_class_get_name)(void* klass);
 typedef size_t (*fn_class_get_num_methods)(void* klass);
 typedef void*  (*fn_class_get_method_from_name)(void* klass, const char* name, int argc);
+typedef void*  (*fn_class_get_field_from_name)(void* klass, const char* name);
+typedef void   (*fn_field_static_get_value)(void* field, void* out);
 
 static fn_domain_get                 p_domain_get = NULL;
 static fn_domain_get_assemblies      p_domain_get_assemblies = NULL;
@@ -27,6 +29,8 @@ static fn_assembly_get_image         p_assembly_get_image = NULL;
 static fn_class_from_name            p_class_from_name = NULL;
 static fn_class_get_name             p_class_get_name = NULL;
 static fn_class_get_method_from_name p_class_get_method_from_name = NULL;
+static fn_class_get_field_from_name  p_class_get_field_from_name = NULL;
+static fn_field_static_get_value     p_field_static_get_value = NULL;
 
 static void* g_domain = NULL;
 
@@ -67,6 +71,8 @@ bool Il2CppInit() {
         p_class_from_name            = (fn_class_from_name)ResolveSym("il2cpp_class_from_name");
         p_class_get_name             = (fn_class_get_name)ResolveSym("il2cpp_class_get_name");
         p_class_get_method_from_name = (fn_class_get_method_from_name)ResolveSym("il2cpp_class_get_method_from_name");
+        p_class_get_field_from_name  = (fn_class_get_field_from_name)ResolveSym("il2cpp_class_get_field_from_name");
+        p_field_static_get_value     = (fn_field_static_get_value)ResolveSym("il2cpp_field_static_get_value");
     }
 
     if (!p_domain_get || !p_domain_get_assemblies || !p_assembly_get_image || !p_class_from_name) {
@@ -123,6 +129,15 @@ void* Il2CppMethod(void* klass, const char* name, int argc) {
     void* mi = p_class_get_method_from_name(klass, name, argc);
     if (!mi) return NULL;
     return *(void**)mi;      // MethodInfo 第 0 欄位 = methodPointer
+}
+
+void* Il2CppStaticFieldPtr(void* klass, const char* name) {
+    if (!klass || !p_class_get_field_from_name || !p_field_static_get_value) return NULL;
+    void* f = p_class_get_field_from_name(klass, name);
+    if (!f) return NULL;
+    void* out = NULL;
+    p_field_static_get_value(f, &out);
+    return out;
 }
 
 // 掃描可寫入且不可執行的記憶體，找出「第 0 欄位 == klassPtr」的物件

@@ -23,4 +23,12 @@ extern double    g_Ch_HeroMaxHp;
 extern int       g_Ch_SetHpOk;   // setCurrentHealth 方法是否解析成功
 extern int       g_Ch_InitTries;
 
+// ---- 資源 / 等級 診斷 ----
+extern int       g_Ch_ResOk;      // 資源鏈 (EducationNode→EducationData→ResourceData) 是否成功
+extern char      g_Ch_ResLog[192];
+extern double    g_Ch_Gold;
+extern double    g_Ch_Gem;
+extern int       g_Ch_Level;
+extern int       g_Ch_Exp;
+
 #endif // CHEATS_H
