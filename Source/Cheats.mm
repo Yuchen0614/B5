@@ -4,6 +4,8 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <mach/mach.h>
+#include <mach/vm_map.h>
 
 // ===== 由 dump.cs 確認過的欄位偏移 =====
 #define OFF_HU_HEALTHOBJ   0x38    // HealthUnitIns.healthObj  (UnitAttrObject*)
