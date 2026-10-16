@@ -146,7 +146,7 @@ int Il2CppFindInstances(uintptr_t klassPtr, uintptr_t* out, int maxOut) {
 
     int n = 0;
     vm_address_t addr = 0;
-    uintptr_t budget = (uintptr_t)1024 * 1024 * 1024;   // 上限 1GB 避免卡住
+    uintptr_t budget = (uintptr_t)256 * 1024 * 1024;   // 上限 256MB（避免卡住主執行緒被 watchdog 砍掉）
 
     while (n < maxOut && budget > 0) {
         vm_size_t size = 0;

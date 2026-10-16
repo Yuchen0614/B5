@@ -65,11 +65,32 @@ static inline void   WriteD(uintptr_t a, double v) { *(volatile double*)a = v; }
 static inline void   WriteF(uintptr_t a, float v)  { *(volatile float*)a  = v; }
 static inline double ReadD(uintptr_t a)            { return *(volatile double*)a; }
 
-// 候選物件是否合理：healthObj 指標有效 + curr 是合理的 double
+int g_Ch_Armed = 0;
+
+// 這個位址是否真的可以安全讀取 len bytes（避免亂解參考造成 SIGSEGV）
+static bool IsReadable(uintptr_t addr, size_t len) {
+    vm_address_t region = (vm_address_t)addr;
+    vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    if (vm_region_64(mach_task_self(), &region, &size, VM_REGION_BASIC_INFO_64,
+                     (vm_region_info_t)&info, &count, &object) != KERN_SUCCESS) return false;
+    if (!(info.protection & VM_PROT_READ)) return false;
+    if (addr < (uintptr_t)region) return false;
+    if (addr + len > (uintptr_t)region + (uintptr_t)size) return false;
+    return true;
+}
+
+// 候選物件是否合理：每個要讀的位址都先驗證過再讀
 static bool PlausibleUnit(uintptr_t obj) {
-    if (obj < 0x10000000) return false;
+    if (obj < 0x10000000 || (obj & 7)) return false;
+    if (!IsReadable(obj, 0x140)) return false;
+
     uintptr_t hp = *(volatile uintptr_t*)(obj + OFF_HU_HEALTHOBJ);
-    if (hp < 0x10000000) return false;
+    if (hp < 0x10000000 || (hp & 7)) return false;
+    if (!IsReadable(hp, 0x40)) return false;
+
     double curr = ReadD(hp + OFF_UA_CURR);
     if (!(curr >= 0.0 && curr < 1e30)) return false;
     return true;
@@ -157,10 +178,17 @@ static bool Cheats_Init() {
 
 static int g_Tick = 0;
 
+// 由選單按鈕觸發：允許開始動作（在此之前完全不碰 il2cpp）
+void Cheats_Arm() {
+    g_Ch_Armed = 1;
+}
+
 void Cheats_Tick() {
-    // 前 2000 幀持續嘗試接上（il2cpp 可能還沒初始化完）
+    // 使用者還沒按下「接上 il2cpp」→ 啟動時完全不做事（零風險）
+    if (!g_Ch_Armed) return;
+
     if (!g_Ch_ApiOk) {
-        if (g_Ch_InitTries >= 2000) return;
+        if (g_Ch_InitTries >= 60) return;    // 最多試 60 次，失敗就停，由使用者再按一次
         g_Ch_InitTries++;
         Cheats_Init();
         return;
@@ -168,8 +196,8 @@ void Cheats_Tick() {
 
     g_Tick++;
 
-    // 敵人會一直生，定期重新掃描
-    if ((g_Tick % 30) == 0) {
+    // 敵人會一直生：只有在開啟「秒殺」時才定期重掃，且頻率放低（重掃很貴）
+    if (g_ModConfig.enableOneShot && (g_Tick % 300) == 0) {
         g_Ch_FoeCount = CollectUnits(g_Ch_Class_FoeIns, g_FoeObjs, 32, 128);
         if (g_Ch_HeroCount == 0)
             g_Ch_HeroCount = CollectUnits(g_Ch_Class_HeroIns, g_HeroObjs, 8, 64);

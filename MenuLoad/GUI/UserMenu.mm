@@ -57,6 +57,17 @@ void UserMenu::DrawMenu()
         // === il2cpp 狀態 (診斷核心) ===
         if (ImGui::CollapsingHeader("il2cpp 狀態", ImGuiTreeNodeFlags_DefaultOpen))
         {
+            if (!g_Ch_Armed) {
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f),
+                                   "尚未啟動 (啟動時不做任何事)");
+                ImGui::TextDisabled("請先進入遊戲戰鬥畫面，再按下面的按鈕");
+            }
+            if (ImGui::Button("接上 il2cpp + 掃描物件")) {
+                Cheats_Arm();
+            }
+            ImGui::SameLine();
+            ImGui::Text("%s", g_Ch_Armed ? "(已啟動)" : "");
+
             ImGui::TextColored(g_Ch_ApiOk ? ImVec4(0,1,0,1) : ImVec4(1,0.4f,0,1),
                                g_Ch_ApiOk ? "API 已接上" : "API 未接上");
             ImGui::TextWrapped("err: %s", g_Ch_ApiErr);
