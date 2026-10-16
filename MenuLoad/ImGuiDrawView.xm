@@ -2,6 +2,7 @@
 #import "GUI/UserMenu.h"
 #import "../Resources/Fonts/Font.h"
 #import "../Source/BasicHacks.h"
+#import "../Source/Cheats.h"
 
 @interface ImGuiDrawView () <MTKViewDelegate>
 
@@ -202,6 +203,9 @@ static bool MenDeal = true;
 
         // 確保 UnityFramework 載入後才掛 Hook (內部有一次性守衛，成本極低)
         InitializeHooks();
+
+        // 每幀套用「純資料改寫」型的功能 (無敵 / 秒殺)
+        Cheats_Tick();
 
         ImFont *font = ImGui::GetFont();
 

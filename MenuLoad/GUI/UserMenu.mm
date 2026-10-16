@@ -2,6 +2,7 @@
 #include "../Includes.h"
 #include "../TextInput.h"
 #include "../../Source/BasicHacks.h"
+#include "../../Source/Cheats.h"
 
 #include <thread>
 #include <string>
@@ -33,53 +34,42 @@ void UserMenu::DrawMenu()
         ImGui::Text("%s", MYSTIFY("IdleGongfu Mod Menu v1.1").c_str());
         ImGui::Separator();
 
-        // === 核心戰鬥功能 ===
-        if (ImGui::CollapsingHeader("核心戰鬥功能", ImGuiTreeNodeFlags_DefaultOpen))
+        // === 功能 (純資料改寫，完全不修改程式碼) ===
+        if (ImGui::CollapsingHeader("功能 (資料改寫)", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            // 傷害倍率
-            ImGui::Text("傷害倍率 (暫時停用)");
-            ImGui::SliderFloat("##DmgMultSlider", &g_ModConfig.damageMultiplier, 1.0f, 1000000.0f, "%.1fx");
-            ImGui::SameLine();
-            ImGui::PushItemWidth(120);
-            if (ImGui::InputFloat("##DmgMultInput", &g_ModConfig.damageMultiplier, 0.1f, 100.0f, "%.1f")) {
-                if (g_ModConfig.damageMultiplier < 1.0f) g_ModConfig.damageMultiplier = 1.0f;
-            }
-            ImGui::PopItemWidth();
-            
-            ImGui::SameLine();
-            if (ImGui::Button("1x")) g_ModConfig.damageMultiplier = 1.0f;
-            ImGui::SameLine(); if (ImGui::Button("10x")) g_ModConfig.damageMultiplier = 10.0f;
-            ImGui::SameLine(); if (ImGui::Button("100x")) g_ModConfig.damageMultiplier = 100.0f;
-            ImGui::SameLine(); if (ImGui::Button("1000x")) g_ModConfig.damageMultiplier = 1000.0f;
-            ImGui::SameLine(); if (ImGui::Button("10000x")) g_ModConfig.damageMultiplier = 10000.0f;
-
-            // ① 先測這個：把程式碼頁的原始內容原封不動寫回去 (語意完全不變)
-            ImGui::Checkbox("1) 寫入測試 (不改內容)", &g_ModConfig.enableWriteTest);
-            ApplyWriteTest(g_ModConfig.enableWriteTest);
-            ImGui::TextDisabled("   若這個就閃退 => 寫入機制本身有問題");
-
-            // ② 真正的秒殺 hook
-            ImGui::Checkbox("2) 秒殺敵人 (勾選即時生效)", &g_ModConfig.enableDamageMultiplier);
-            ApplyDamageHook(g_ModConfig.enableDamageMultiplier);
+            ImGui::Checkbox("無敵 (血量鎖定)", &g_ModConfig.enableGodMode);
+            ImGui::Checkbox("秒殺敵人", &g_ModConfig.enableOneShot);
 
             ImGui::Separator();
 
-            // 無敵模式
-            ImGui::Checkbox("無敵模式 (尚未實作)", &g_ModConfig.enableGodMode);
+            ImGui::Text("玩家血量: %.0f / %.0f", g_Ch_HeroHp, g_Ch_HeroMaxHp);
+            ImGui::Text("Hero 物件: 0x%llX  找到 %d 個",
+                        (unsigned long long)g_Ch_HeroObj, g_Ch_HeroCount);
+            ImGui::Text("敵人: %d 個", g_Ch_FoeCount);
+        }
 
-            ImGui::Separator();
+        ImGui::Separator();
 
-            // 免費購物/資源不減：替換資料段的方法指標 (完全不碰程式碼頁)
-            ImGui::Checkbox("免費購物 / 資源不減 (勾選即時生效)", &g_ModConfig.enableFreeShopping);
-            ApplyFreeShop(g_ModConfig.enableFreeShopping);
-
-            ImGui::TextDisabled("作法: 替換 methodPointer，不修改程式碼頁");
+        // === il2cpp 狀態 (診斷核心) ===
+        if (ImGui::CollapsingHeader("il2cpp 狀態", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::TextColored(g_Ch_ApiOk ? ImVec4(0,1,0,1) : ImVec4(1,0.4f,0,1),
+                               g_Ch_ApiOk ? "API 已接上" : "API 未接上");
+            ImGui::TextWrapped("err: %s", g_Ch_ApiErr);
+            ImGui::Text("HeroIns=0x%llX  FoeIns=0x%llX",
+                        (unsigned long long)g_Ch_Class_HeroIns,
+                        (unsigned long long)g_Ch_Class_FoeIns);
+            ImGui::Text("UnitAttr=0x%llX  ResourceData=0x%llX",
+                        (unsigned long long)g_Ch_Class_UnitAttr,
+                        (unsigned long long)g_Ch_Class_ResourceData);
+            ImGui::TextWrapped("log: %s", g_Ch_Log);
+            ImGui::Text("setCurrentHealth=%d  嘗試=%d", g_Ch_SetHpOk, g_Ch_InitTries);
         }
 
         ImGui::Separator();
 
         // === 診斷 (確認 hook 有沒有真的掛上) ===
-        if (ImGui::CollapsingHeader("診斷 (Hook 狀態)", ImGuiTreeNodeFlags_DefaultOpen))
+        if (ImGui::CollapsingHeader("診斷 (Hook 狀態)"))
         {
             ImGui::TextWrapped("Base: %s", g_BaseImage[0] ? g_BaseImage : "(未取得)");
             ImGui::Text("Base Addr: 0x%llX", (unsigned long long)g_BaseAddr);
